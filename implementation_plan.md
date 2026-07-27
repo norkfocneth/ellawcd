@@ -355,23 +355,33 @@ BOOT → ACTIVE (passively listening for "Ella")
 
 ---
 
-### Phase 7 — Memory + Context 🧠
+### Phase 7 — The Perfect Memory Engine 🧠
 
-**Goal**: Long-term memory + context resolution ("ye", "wo")
+**Goal**: A hyper-advanced memory system that remembers identity, facts, decisions, and relationships. It learns *from* the user to become an extension of their memory.
 
 **New Files**:
 
 | File | Purpose |
 |---|---|
-| `memory.py` | SQLite backend with vector-ready interface |
-| `context.py` | Context Window Manager — tracks last_file, last_screenshot, active_window, etc. |
-| `data/memory.db` | Database file |
+| `memory/engine.py` | Core engine managing SQL + Graph + Vector storage |
+| `memory/extractor.py` | LLM-powered post-conversation data extraction |
+| `memory/graph.py` | Behavior Graph manager (entities + relationships) |
+| `context.py` | Context Window Manager — tracks active state ("ye", "wo") |
 
-**Schema**: preferences, facts, conversations, action_log, patterns (see ARCHITECTURE.md)
+**The Storage Architecture**:
+- **Conversations**: Raw chat history + summaries.
+- **Decisions**: "Gemma choose kiya", "Llama reject kiya".
+- **Projects**: Project-specific context (Ella, Proxxy, etc.).
+- **Habits & Preferences**: Routine patterns, coding style.
+- **Personality & Vocabulary**: User traits, Hinglish/tech slang.
+- **Relationships (Behavior Graph)**: Connections like `Arnav → building → Ella → offline`.
+- **Embeddings**: Vector search for semantic retrieval.
 
-**Test**: "Remember mera favourite editor VS Code hai" → stored. Restart → "Mera favourite editor kya hai?" → "VS Code". "Ye delete kar do" → resolves "ye" from context.
+**Post-Conversation Pipeline**:
+Every chat triggers an asynchronous background process:
+`Raw Chat → Summary → Extract Facts → Extract Preferences → Extract Decisions → Extract Tasks → Extract Emotions → Store → Update Profile & Graph`
 
----
+**Test**: "Maine February me Stella ke baare me kya bola tha?" → Accurately retrieves context. "Maine kab decide kiya tha Gemma use karna hai?" → Retrieves the exact decision node.
 
 ### Phase 8 — Planner Engine 📋
 

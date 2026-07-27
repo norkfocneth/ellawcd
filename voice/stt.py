@@ -122,6 +122,9 @@ class WhisperSTT:
                 vad_parameters=dict(
                     min_silence_duration_ms=400,
                 ),
+                condition_on_previous_text=False,  # Prevents infinite repetition loops like '.Clear.Clear.Clear'
+                no_speech_threshold=0.6,           # Drops segments where the model predicts background noise/silence
+                logprob_threshold=-1.0,            # Filters out low-confidence hallucinations
             )
             
             # Collect all segment texts

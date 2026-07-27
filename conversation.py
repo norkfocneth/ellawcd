@@ -130,8 +130,28 @@ class ConversationManager:
                 if not user_input.strip():
                     continue
                 
-                # Reset inactivity on any input
-                self.session.reset_inactivity()
+                # Smart Wake Logic
+                if self.session.is_sleeping():
+                    if self.voice_mode:
+                        # In voice mode, REQUIRE wake word to wake up
+                        if "ella" not in user_input.lower():
+                            log.debug("Ignored background speech while sleeping.")
+                            continue
+                        
+                        # Wake word detected
+                        self.session.wake()
+                        user_input = re.sub(r'^(hey\s+)?ella[,.!?]?\s*', '', user_input, flags=re.IGNORECASE).strip()
+                        
+                        if not user_input:
+                            self._display_ella(MSG_WAKING)
+                            self.tts.speak(MSG_WAKING, block=True)
+                            continue
+                    else:
+                        # In text mode, any typing wakes her up
+                        self.session.wake()
+                else:
+                    # Already active, just reset the timer
+                    self.session.reset_inactivity()
                 
                 # Handle mode switching commands
                 cmd = user_input.strip().lower()

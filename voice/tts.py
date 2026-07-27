@@ -114,13 +114,15 @@ class TextToSpeech(BaseTTS):
             
             log.info(f"ONNX Execution Providers: {providers}")
             
-            # Load ONNX model with selected providers
+            # Explicitly set ONNX_PROVIDER to force CUDA if available
+            if 'CUDAExecutionProvider' in available_providers:
+                os.environ["ONNX_PROVIDER"] = "CUDAExecutionProvider"
+            
+            # Load ONNX model (Kokoro handles providers natively in its __init__)
             self.kokoro = Kokoro(
                 model_path=str(self.model_path),
                 voices_path=str(self.voices_path),
             )
-            # Explicitly force ORT session providers to leverage CUDA if present
-            self.kokoro.sess.set_providers(providers)
             
             log.info("Kokoro TTS engine ready.")
         except Exception as e:
