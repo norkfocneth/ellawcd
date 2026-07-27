@@ -161,5 +161,19 @@ class TextToSpeech:
         # Remove JSON memory blocks if any left
         text = re.sub(r'```ella_memory.*?```', '', text, flags=re.DOTALL)
         
-        # Keep letters, numbers, common punctuation, Hinglish words
+        # Remove ALL emojis and Unicode symbols so TTS never speaks emoji names
+        emoji_pattern = re.compile(
+            "["
+            "\U00010000-\U0010FFFF"  # Emojis & pictographs
+            "\u2600-\u27BF"          # Misc symbols & dingbats
+            "\u2300-\u23FF"          # Tech symbols
+            "\u2B00-\u2BFF"          # Misc symbols
+            "]+", flags=re.UNICODE
+        )
+        text = emoji_pattern.sub('', text)
+        
+        # Clean extra spaces
+        text = re.sub(r'\s+', ' ', text)
+        
         return text.strip()
+
