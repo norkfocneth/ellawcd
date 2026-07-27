@@ -192,24 +192,28 @@ class ConversationManager:
             return self._get_text_input()
         
         # Show listening indicator
-        console.print("\n  [bold green]🎤 Listening...[/bold green] ", end="")
+        console.print("\n  [bold green]Listening...[/bold green] [dim](speak now)[/dim]", end="")
         
-        # Capture audio from mic
+        # Capture audio from mic (blocks until speech detected + ended)
         audio = self.listener.listen_once()
         
         if audio is None:
-            console.print("[dim]no speech detected[/dim]")
+            # No speech detected within timeout — just re-listen
+            console.print("\r  [dim]...waiting for voice...[/dim]                              ", end="\r")
             return ""
         
+        # Show that we're processing
+        duration = len(audio) / self.listener.sample_rate
+        console.print(f"\r  [bold yellow]Processing {duration:.1f}s audio...[/bold yellow]                    ", end="")
+        
         # Transcribe audio to text
-        console.print("[bold yellow]transcribing...[/bold yellow]", end="")
         text = self.stt.transcribe(audio)
         
         if text:
-            console.print(f"\r  [bold cyan]You[/bold cyan]   {text}                    ")
+            console.print(f"\r  [bold cyan]You[/bold cyan]   {text}                                        ")
             return text
         else:
-            console.print("\r  [dim]couldn't understand, try again[/dim]        ")
+            console.print("\r  [dim]Couldn't understand. Try speaking louder or closer.[/dim]              ")
             return ""
 
     def _switch_to_voice_mode(self):

@@ -4,9 +4,7 @@
 # ──────────────────────────────────────────────
 
 import numpy as np
-import threading
 import time
-import queue
 
 from logger import get_logger
 from events import event_bus, Event
@@ -16,27 +14,20 @@ log = get_logger("voice.listener")
 # Audio settings
 SAMPLE_RATE = 16000       # 16kHz for Whisper
 CHANNELS = 1              # Mono
-CHUNK_DURATION = 0.5      # 500ms chunks
-SILENCE_THRESHOLD = 0.02  # RMS below this = silence
-SILENCE_DURATION = 1.5    # Seconds of silence to end recording
-MIN_SPEECH_DURATION = 0.5 # Minimum speech to process (ignore noise)
-MAX_RECORD_SECONDS = 30   # Max recording length
+CHUNK_DURATION = 0.3      # 300ms chunks (faster response)
+SILENCE_DURATION = 1.2    # 1.2s of silence = speech ended
+MIN_SPEECH_DURATION = 0.3 # Min speech to process
+MAX_RECORD_SECONDS = 20   # Max recording length
+MAX_WAIT_SECONDS = 15     # Max wait for speech to start
 
 
 class MicListener:
     """
-    Ella's microphone listener — captures voice and detects speech boundaries.
+    Ella's microphone listener — captures voice and detects speech.
     
-    How it works:
-    1. Continuously captures audio from default microphone
-    2. Detects when user STARTS speaking (RMS > threshold)
-    3. Records until user STOPS speaking (silence > 1.5s)
-    4. Returns the recorded audio chunk for STT processing
-    
-    Usage:
-        listener = MicListener()
-        audio = listener.listen_once()   # Blocks until speech detected + ended
-        # audio is a numpy float32 array ready for Whisper
+    Uses adaptive noise floor: samples ambient noise first, then
+    sets threshold dynamically. This prevents getting stuck when
+    there's background noise.
     """
 
     def __init__(self):
@@ -44,15 +35,15 @@ class MicListener:
         self.channels = CHANNELS
         self.chunk_samples = int(SAMPLE_RATE * CHUNK_DURATION)
         self.is_listening = False
+        self.noise_floor = 0.01  # Will be calibrated
         self._sd = None
         self._load_sounddevice()
 
     def _load_sounddevice(self):
-        """Import sounddevice (lazy load to avoid errors if no mic)."""
+        """Import sounddevice."""
         try:
             import sounddevice as sd
             self._sd = sd
-            # Set default parameters
             sd.default.samplerate = self.sample_rate
             sd.default.channels = self.channels
             sd.default.dtype = 'float32'
@@ -71,16 +62,36 @@ class MicListener:
         except Exception:
             return False
 
+    def _calibrate_noise_floor(self, stream, duration: float = 0.5) -> float:
+        """
+        Sample ambient noise for a short period to determine baseline.
+        Threshold will be set at 3x this level.
+        """
+        rms_values = []
+        chunks_needed = int(duration / CHUNK_DURATION)
+        
+        for _ in range(max(chunks_needed, 2)):
+            audio_chunk, _ = stream.read(self.chunk_samples)
+            audio_chunk = audio_chunk.flatten()
+            rms = np.sqrt(np.mean(audio_chunk ** 2))
+            rms_values.append(rms)
+        
+        noise_floor = np.mean(rms_values)
+        # Threshold = 3x noise floor, but at least 0.008 and at most 0.05
+        threshold = max(0.008, min(noise_floor * 3.0, 0.05))
+        log.debug(f"Noise floor: {noise_floor:.4f}, threshold: {threshold:.4f}")
+        return threshold
+
     def listen_once(self) -> np.ndarray | None:
         """
         Listen for one complete speech utterance.
         
-        Blocks until:
-        1. User starts speaking (audio > threshold)
-        2. User stops speaking (silence > 1.5 seconds)
+        1. Calibrates ambient noise level
+        2. Waits for speech to start (volume > threshold)
+        3. Records until speech ends (silence > 1.2 seconds)
+        4. Returns audio numpy array
         
-        Returns:
-            numpy float32 array of recorded audio, or None if error/no speech
+        Returns None if no speech detected within MAX_WAIT_SECONDS.
         """
         if self._sd is None:
             log.error("Microphone not available")
@@ -90,15 +101,9 @@ class MicListener:
         is_speaking = False
         silence_start = None
         record_start = None
+        wait_start = time.time()
         
         try:
-            # Show listening indicator
-            event_bus.emit(Event(
-                name="ListeningStarted",
-                source="voice.listener",
-                data={"status": "waiting_for_speech"}
-            ))
-            
             with self._sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
@@ -106,11 +111,15 @@ class MicListener:
                 blocksize=self.chunk_samples
             ) as stream:
                 
+                # Step 1: Calibrate noise floor
+                threshold = self._calibrate_noise_floor(stream)
+                self.noise_floor = threshold
+                
                 self.is_listening = True
                 
                 while self.is_listening:
                     # Read audio chunk
-                    audio_chunk, overflowed = stream.read(self.chunk_samples)
+                    audio_chunk, _ = stream.read(self.chunk_samples)
                     audio_chunk = audio_chunk.flatten()
                     
                     # Calculate RMS (volume level)
@@ -118,32 +127,32 @@ class MicListener:
                     
                     if not is_speaking:
                         # Waiting for speech to start
-                        if rms > SILENCE_THRESHOLD:
+                        if rms > threshold:
                             is_speaking = True
                             record_start = time.time()
                             silence_start = None
                             audio_chunks.append(audio_chunk)
-                            log.debug("Speech detected — recording...")
-                            
-                            event_bus.emit(Event(
-                                name="ListeningStarted",
-                                source="voice.listener",
-                                data={"status": "recording"}
-                            ))
+                            log.debug(f"Speech detected (rms={rms:.4f} > threshold={threshold:.4f})")
+                        else:
+                            # Timeout: give up waiting for speech
+                            if time.time() - wait_start > MAX_WAIT_SECONDS:
+                                log.debug("No speech detected — timeout")
+                                self.is_listening = False
+                                return None
                     else:
-                        # Currently recording
+                        # Recording speech
                         audio_chunks.append(audio_chunk)
                         
-                        if rms < SILENCE_THRESHOLD:
-                            # Silence detected
+                        if rms < threshold:
+                            # Below threshold — silence
                             if silence_start is None:
                                 silence_start = time.time()
                             elif time.time() - silence_start >= SILENCE_DURATION:
-                                # Enough silence — speech is done
+                                # Speech ended!
                                 log.debug("Speech ended — silence detected")
                                 break
                         else:
-                            # Still speaking — reset silence timer
+                            # Still speaking
                             silence_start = None
                         
                         # Safety: max recording length
@@ -156,7 +165,7 @@ class MicListener:
             if not audio_chunks:
                 return None
             
-            # Combine all chunks into single array
+            # Combine all chunks
             full_audio = np.concatenate(audio_chunks)
             
             # Check minimum duration
