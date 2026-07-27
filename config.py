@@ -5,7 +5,13 @@
 
 import os
 import json
+import warnings
 from pathlib import Path
+
+# Suppress HuggingFace cache/symlink warnings
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 # ── Paths ──────────────────────────────────────

@@ -33,6 +33,11 @@ class WhisperSTT:
 
     def _load_model(self):
         """Load the faster-whisper model."""
+        import warnings
+        import os
+        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+        warnings.filterwarnings("ignore")
+        
         try:
             from faster_whisper import WhisperModel
             
