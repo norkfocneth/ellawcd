@@ -68,15 +68,14 @@ def boot_sequence():
         ("Loading Ella", "bold white", 0.3),
         ("Loading Brain", "bold yellow", 0.5),
         ("Loading Memory", "bold cyan", 0.3),
-        ("Loading Voice", "bold green", 0.2),
-        ("Loading Vision", "bold blue", 0.2),
+        ("Loading Voice", "bold green", 0.3),
     ]
     
     for step_name, style, delay in steps:
-        # Show loading with dots animation
         console.print(f"  [{style}]●[/{style}] {step_name}...", end="")
         time.sleep(delay)
         console.print(f" [green]✓[/green]")
+
     
     console.print()
     
@@ -116,7 +115,7 @@ def boot_sequence():
     console.print(
         Panel(
             f"[bold green]Ready.[/bold green]\n"
-            f"[dim]Model: {MODEL_NAME} │ Mode: Text │ User: {USER_NAME}[/dim]",
+            f"[dim]Model: {MODEL_NAME} │ Mode: Text + Voice │ User: {USER_NAME}[/dim]",
             border_style="green",
             padding=(0, 2),
         )

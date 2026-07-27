@@ -68,7 +68,7 @@ MSG_DONE = "Done! Aur kuch?"
 MSG_ERROR = "Hmm, kuch gadbad ho gayi. Retry karun?"
 MSG_SLEEPING = "Koi baat nahi, main yahan hoon. Jab zarurat ho, 'Ella' bolo."
 MSG_WAKING = f"Haan {USER_NAME}, bolo!"
-MSG_GOODBYE = f"Bye {USER_NAME}! Take care. 👋"
+MSG_GOODBYE = f"Bye {USER_NAME}! Take care."
 MSG_CONFIRM_DANGEROUS = "Ye ek risky action hai. Sach me karun? Confirm karo."
 
 

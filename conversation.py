@@ -1,10 +1,13 @@
 # ──────────────────────────────────────────────
 # Project Ella v1.0 — Conversation Manager
-# Text chat loop with message history
+# Text input + Brain + Memory + Voice TTS output
 # ──────────────────────────────────────────────
 
+import re
+import uuid
+
 from brain.gemma import GemmaBrain
-from brain.prompts import get_greeting, MSG_GOODBYE
+from brain.prompts import SYSTEM_PROMPT, get_greeting, MSG_GOODBYE
 from memory import Memory
 from voice.tts import TextToSpeech
 from logger import get_logger
@@ -17,52 +20,45 @@ class ConversationManager:
     """
     Manages the chat loop between user and Ella.
     
-    Phase 2: Text Input → Brain + Persistent Memory DB + Neural TTS Voice Output!
-    
-    Usage:
-        brain = GemmaBrain()
-        convo = ConversationManager(brain)
-        convo.start()
+    Phase 2: Text Input → Brain + Persistent Memory DB + Neural TTS Voice Output
     """
 
     def __init__(self, brain: GemmaBrain):
-        """
-        Initialize conversation manager with Memory and Voice.
-        """
         self.brain = brain
         self.memory = Memory()
         self.tts = TextToSpeech()
         self.is_active = False
         self.message_count = 0
+        self.session_id = str(uuid.uuid4())[:8]
         
-        # Inject stored facts and memory context into Gemma system prompt
-        self._inject_memory_context()
+        # Build system prompt with memory context (once, cleanly)
+        self._build_full_system_prompt()
         log.info("ConversationManager initialized with Memory & TTS Voice")
 
-    def _inject_memory_context(self):
-        """Load stored facts and past conversations from DB into brain's context."""
+    def _build_full_system_prompt(self):
+        """
+        Build the full system prompt from base prompt + memory context.
+        Does NOT keep appending — rebuilds from scratch each time.
+        """
         try:
+            full_prompt = SYSTEM_PROMPT
+            
             mem_context = self.memory.build_memory_context()
-            fact_extract_instructions = self.memory.extract_facts_prompt()
-            
             if mem_context:
-                self.brain.system_prompt += f"\n\n{mem_context}"
-            self.brain.system_prompt += f"\n\n{fact_extract_instructions}"
+                full_prompt += f"\n\n{mem_context}"
             
-            # Re-init conversation with updated system prompt
+            self.brain.system_prompt = full_prompt
             self.brain._init_conversation()
-            log.info("Memory context & fact extraction instructions loaded into Brain")
+            log.info("System prompt rebuilt with latest memory context")
         except Exception as e:
-            log.error(f"Error injecting memory context: {e}")
-
+            log.error(f"Error building system prompt: {e}")
 
     def start(self) -> None:
-        """
-        Start the interactive text conversation loop.
-        
-        Runs until user types 'exit', 'quit', 'bye', or 'stop ella'.
-        """
+        """Start the interactive text conversation loop."""
         self.is_active = True
+        
+        # Track session
+        self.memory.start_session(self.session_id)
         
         # Emit session start event
         event_bus.emit(Event(
@@ -75,18 +71,15 @@ class ConversationManager:
         greeting = get_greeting()
         self._display_ella_response(greeting)
         self.tts.speak(greeting, block=False)
-
         
-        log.info("Conversation started — text mode")
+        log.info("Conversation started — text + voice mode")
         
         # Main chat loop
         while self.is_active:
             try:
-                # Get user input
                 user_input = self._get_user_input()
                 
                 if user_input is None:
-                    # User pressed Ctrl+C or EOF
                     break
                 
                 if not user_input.strip():
@@ -95,17 +88,27 @@ class ConversationManager:
                 # Check for exit commands
                 if self._is_exit_command(user_input):
                     self._display_ella_response(MSG_GOODBYE)
+                    self.tts.speak(MSG_GOODBYE, block=True)
                     break
                 
                 # Process the message
                 self._process_message(user_input)
                 
             except KeyboardInterrupt:
-                print()  # New line after ^C
+                print()
                 self._display_ella_response(MSG_GOODBYE)
                 break
         
         self.is_active = False
+        
+        # End session tracking
+        self.memory.end_session(
+            self.session_id,
+            message_count=self.message_count
+        )
+        
+        # Close memory DB cleanly
+        self.memory.close()
         
         # Emit session end event
         event_bus.emit(Event(
@@ -117,9 +120,7 @@ class ConversationManager:
         log.info(f"Conversation ended — {self.message_count} messages exchanged")
 
     def _process_message(self, user_input: str) -> str:
-        """
-        Process user message: Get Brain response, save to Memory, speak out loud!
-        """
+        """Process user message: stream response, save to memory, speak out loud."""
         self.message_count += 1
         
         log.info(f"User: {user_input[:80]}")
@@ -134,72 +135,74 @@ class ConversationManager:
         # Stream response from brain
         raw_response = self._get_streamed_response(user_input)
         
-        # Parse and save any auto-extracted facts from response
-        clean_response, facts_updated = self.memory.parse_and_save_facts(raw_response)
-        
-        # If new/updated facts learned, re-inject memory into system prompt immediately
-        if facts_updated:
-            self._inject_memory_context()
+        # Strip any stray code/json blocks from response
+        clean_response = self._strip_code_blocks(raw_response)
         
         # Save to permanent memory DB
-        self.memory.save_conversation(user_input, clean_response)
+        self.memory.save_conversation(
+            user_input, clean_response,
+            session_id=self.session_id
+        )
         
-        # Speak Ella's reply out loud!
+        # Trim conversation history to prevent context window overflow
+        self.brain.trim_conversation(keep_last=30)
+        
+        # Speak Ella's reply out loud (non-blocking so user can type next)
         self.tts.speak(clean_response, block=False)
         
         return clean_response
 
-
     def _get_streamed_response(self, user_input: str) -> str:
-        """
-        Get and display a streamed response from the brain.
-        """
+        """Stream response from brain and display tokens in real-time."""
         from rich.console import Console
         console = Console()
         
         full_response = ""
+        in_code_block = False
         
-        # Print Ella's name prefix
         console.print("\n  [bold magenta]Ella[/bold magenta]  ", end="")
         
-        # Stream tokens
         for chunk in self.brain.chat_stream(user_input):
-            # Don't print hidden memory JSON blocks to terminal
-            if "```ella_memory" in chunk or "```" in chunk and "ella_memory" in full_response:
-                full_response += chunk
-                continue
-            console.print(chunk, end="", highlight=False)
             full_response += chunk
+            
+            # Track code block state to suppress printing hidden blocks
+            if "```" in chunk:
+                if in_code_block:
+                    in_code_block = False
+                    continue
+                # Check if this is a ella_memory or json block
+                remaining = full_response[full_response.rfind("```"):]
+                if any(tag in remaining.lower() for tag in ["ella_memory", "json"]):
+                    in_code_block = True
+                    continue
+            
+            if in_code_block:
+                continue
+            
+            console.print(chunk, end="", highlight=False)
         
-        # Final newline
         console.print()
-        
         return full_response
 
+    def _strip_code_blocks(self, text: str) -> str:
+        """Remove all code blocks (```...```) from response text."""
+        cleaned = re.sub(r'```(?:ella_memory|json)?\s*\n.*?\n```', '', text, flags=re.DOTALL)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
 
     def _display_ella_response(self, text: str) -> None:
         """Display a pre-formatted Ella response (not from brain)."""
         from rich.console import Console
-        from rich.panel import Panel
-        
         console = Console()
         console.print(f"\n  [bold magenta]Ella[/bold magenta]  {text}")
 
     def _get_user_input(self) -> str | None:
-        """
-        Get text input from the user.
-        
-        Returns:
-            User's input string, or None if EOF/interrupt
-        """
+        """Get text input from the user."""
         try:
             from rich.console import Console
             console = Console()
-            
-            # User prompt with styling
             user_input = console.input("\n  [bold cyan]You[/bold cyan]   ")
             return user_input
-            
         except EOFError:
             return None
 
@@ -212,16 +215,7 @@ class ConversationManager:
         return text.strip().lower() in exit_commands
 
     def send_message(self, message: str) -> str:
-        """
-        Send a message programmatically (not from user input loop).
-        Useful for other modules that need to query the brain.
-        
-        Args:
-            message: Text to send to the brain
-            
-        Returns:
-            Brain's response
-        """
+        """Send a message programmatically (not from user input loop)."""
         self.message_count += 1
         response = self.brain.chat(message)
         return response
