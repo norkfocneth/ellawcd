@@ -6,6 +6,7 @@
 
 import re
 import uuid
+import time
 import threading
 
 from brain.gemma import GemmaBrain
@@ -134,13 +135,16 @@ class ConversationManager:
                 if self.session.is_sleeping():
                     if self.voice_mode:
                         # In voice mode, REQUIRE wake word to wake up
-                        if "ella" not in user_input.lower():
+                        lower_input = user_input.lower()
+                        wake_phrases = ["ella", "hey ella", "wake up", "rise ella"]
+                        if not any(phrase in lower_input for phrase in wake_phrases):
                             log.debug("Ignored background speech while sleeping.")
                             continue
                         
                         # Wake word detected
                         self.session.wake()
                         user_input = re.sub(r'^(hey\s+)?ella[,.!?]?\s*', '', user_input, flags=re.IGNORECASE).strip()
+                        user_input = re.sub(r'^(wake\s+up|rise)\s*', '', user_input, flags=re.IGNORECASE).strip()
                         
                         if not user_input:
                             self._display_ella(MSG_WAKING)
@@ -166,14 +170,20 @@ class ConversationManager:
                 
                 if cmd == "reset":
                     self.brain.reset_conversation()
-                    self._display_ella("Conversation memory cleared. Let's start fresh!")
-                    self.tts.speak("Memory cleared. Let's start fresh.", block=False)
+                    self._display_ella("Conversation memory cleared. Starting fresh!")
+                    self.tts.speak("Memory cleared. Starting fresh.", block=False)
                     continue
                 
                 if self._is_exit_command(cmd):
                     self._display_ella(MSG_GOODBYE)
                     self.tts.speak(MSG_GOODBYE, block=True)
                     break
+                
+                # Check for sleep commands
+                if self._is_sleep_command(cmd):
+                    self.session.set_state(SessionState.SLEEPING)
+                    self._handle_sleep()
+                    continue
                 
                 # Process the message
                 self._process_message(user_input)
@@ -210,7 +220,6 @@ class ConversationManager:
 
     def _get_voice_input(self) -> str | None:
         """Get voice input from microphone → STT transcription."""
-        import time
         from rich.console import Console
         console = Console()
         
@@ -218,8 +227,9 @@ class ConversationManager:
             self._switch_to_text_mode()
             return self._get_text_input()
         
-        # Brief pause to ensure speakers are completely silent before opening mic
-        time.sleep(0.4)
+        # Wait for TTS to finish speaking before opening mic
+        # This prevents Ella from hearing herself
+        time.sleep(0.6)
         
         # Show listening indicator
         console.print("\n  [bold green]Listening...[/bold green] [dim](speak now)[/dim]", end="")
@@ -242,7 +252,7 @@ class ConversationManager:
             console.print(f"\r  [bold cyan]You[/bold cyan]   {text}                                        ")
             return text
         else:
-            console.print("\r  [dim]Couldn't understand. Try speaking louder or closer.[/dim]              ")
+            console.print("\r  [dim]...[/dim]                                                               ", end="\r")
             return ""
 
     def _switch_to_voice_mode(self):
@@ -256,12 +266,12 @@ class ConversationManager:
         
         if success:
             self.voice_mode = True
-            msg = "Voice mode activated. Main tumhari awaaz sun rahi hoon. Bolo!"
+            msg = "Voice mode activated. I'm listening. Go ahead!"
             self._display_ella(msg)
             self.tts.speak(msg, block=True)  # Wait for speech to finish before mic opens!
-            console.print("  [dim]Say 'text mode' or type Ctrl+C to switch back[/dim]")
+            console.print("  [dim]Say 'text mode' to switch back │ 'bye' to exit[/dim]")
         else:
-            msg = "Sorry, microphone ya STT model load nahi ho paya. Text mode me rehte hain."
+            msg = "Sorry, could not start voice mode. Microphone or STT model failed to load."
             self._display_ella(msg)
             self.tts.speak(msg, block=True)
             self.voice_mode = False
@@ -275,7 +285,7 @@ class ConversationManager:
         if self.listener:
             self.listener.stop()
         
-        msg = "Text mode me wapas aa gayi. Type karo!"
+        msg = "Switched to text mode. Go ahead and type!"
         self._display_ella(msg)
         self.tts.speak(msg, block=False)
 
@@ -303,9 +313,12 @@ class ConversationManager:
         raw_response = self._get_streamed_response(user_input)
         clean_response = self._strip_code_blocks(raw_response)
         
+        # Post-generation hallucination guard
+        clean_response = self._filter_response_hallucinations(clean_response)
+        
         # If response was empty after stripping, set friendly fallback
         if not clean_response:
-            clean_response = "Haan, bolo, main sun rahi hoon!"
+            clean_response = "Sorry, I didn't catch that. Could you say that again?"
             from rich.console import Console
             Console().print(clean_response)
         
@@ -348,6 +361,28 @@ class ConversationManager:
         console.print()
         return full_response
 
+    def _filter_response_hallucinations(self, text: str) -> str:
+        """Filter out known LLM hallucination patterns from responses."""
+        if not text:
+            return ""
+        
+        # Catch .Clear.Clear.Clear repetition loops
+        if ".clear" in text.lower() and text.lower().count("clear") > 2:
+            log.warning(f"Filtered hallucinated response: '{text[:50]}'")
+            return ""
+        
+        # Catch any word/phrase repeated more than 5 times
+        words = text.split()
+        if len(words) >= 5:
+            from collections import Counter
+            counts = Counter(words)
+            most_common_word, most_common_count = counts.most_common(1)[0]
+            if most_common_count > 5 and most_common_count / len(words) > 0.5:
+                log.warning(f"Filtered repetitive response: '{text[:50]}'")
+                return ""
+        
+        return text
+
     # ═══════════════════════════════════════════
     # SLEEP / WAKE HANDLERS
     # ═══════════════════════════════════════════
@@ -376,9 +411,18 @@ class ConversationManager:
     def _is_exit_command(self, text: str) -> bool:
         exit_commands = {
             "exit", "quit", "bye", "bye ella", "stop", "stop ella",
-            "band karo", "goodbye", "chal bye", "nikal", "close",
+            "goodbye", "close", "close ella", "shutdown", "shutdown ella",
+            "band karo", "chal bye", "nikal",
         }
         return text.strip().lower() in exit_commands
+
+    def _is_sleep_command(self, text: str) -> bool:
+        """Check if user wants Ella to go to sleep (stop listening until wake word)."""
+        sleep_commands = {
+            "sleep", "go to sleep", "sleep ella", "ella sleep",
+            "so jao", "chup", "shh", "quiet", "mute",
+        }
+        return text.strip().lower() in sleep_commands
 
     def send_message(self, message: str) -> str:
         self.message_count += 1

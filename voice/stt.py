@@ -4,6 +4,7 @@
 # ──────────────────────────────────────────────
 
 import numpy as np
+import re
 import time
 
 from config import STT_MODEL
@@ -11,6 +12,19 @@ from logger import get_logger
 from events import event_bus, Event
 
 log = get_logger("voice.stt")
+
+# Known Whisper hallucination patterns (silence artifacts)
+HALLUCINATION_PATTERNS = [
+    r'^\.?\s*(clear\s*\.?\s*)+$',           # .Clear.Clear.Clear
+    r'^\.?\s*(\.)+\s*$',                      # Just dots
+    r'^(\s*\.\s*)+$',                         # Dots with spaces
+    r'^\s*$',                                 # Empty/whitespace only
+    r'^(.{1,8})\1{3,}$',                     # Any short word repeated 4+ times
+    r'^\s*(thank you|thanks)\s*\.?\s*$',     # Common Whisper hallucination
+    r'^\s*(you)\s*$',                         # Single word "you"
+    r'^\s*bye\s*\.?\s*$',                    # Just "bye" from silence
+]
+HALLUCINATION_RE = [re.compile(p, re.IGNORECASE) for p in HALLUCINATION_PATTERNS]
 
 
 class WhisperSTT:
@@ -81,6 +95,28 @@ class WhisperSTT:
             log.error("faster-whisper not installed. Run: pip install faster-whisper")
             self.model = None
 
+    def _is_hallucination(self, text: str) -> bool:
+        """Check if transcribed text is a known Whisper hallucination pattern."""
+        if not text or len(text.strip()) < 2:
+            return True
+        
+        for pattern in HALLUCINATION_RE:
+            if pattern.match(text.strip()):
+                log.debug(f"Filtered hallucination: '{text[:40]}'")
+                return True
+        
+        # Check for excessive repetition of any word
+        words = text.lower().split()
+        if len(words) >= 3:
+            from collections import Counter
+            counts = Counter(words)
+            most_common_word, most_common_count = counts.most_common(1)[0]
+            if most_common_count / len(words) > 0.7:
+                log.debug(f"Filtered repetitive hallucination: '{text[:40]}'")
+                return True
+        
+        return False
+
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
         """
         Transcribe audio numpy array to text.
@@ -112,26 +148,34 @@ class WhisperSTT:
             if np.abs(audio).max() > 1.0:
                 audio = audio / np.abs(audio).max()
             
-            # Transcribe with language="en" for accurate Hinglish/English Latin script
+            # Transcribe with language="en" for accurate English transcription
             segments, info = self.model.transcribe(
                 audio,
                 beam_size=3,
                 language="en",
-                initial_prompt="Hello Ella. Kaise ho? Kya kar rahi ho?",
+                initial_prompt="Hello Ella. How are you? Open Chrome please. What is the weather today?",
                 vad_filter=True,           # Voice Activity Detection filter
                 vad_parameters=dict(
-                    min_silence_duration_ms=400,
+                    min_silence_duration_ms=500,
+                    speech_pad_ms=200,
                 ),
-                condition_on_previous_text=False,  # Prevents infinite repetition loops like '.Clear.Clear.Clear'
-                no_speech_threshold=0.6,           # Drops segments where the model predicts background noise/silence
+                condition_on_previous_text=False,  # Prevents infinite repetition loops
+                no_speech_threshold=0.6,           # Drops segments with predicted silence
             )
             
             # Collect all segment texts
             text_parts = []
             for segment in segments:
-                text_parts.append(segment.text.strip())
+                seg_text = segment.text.strip()
+                if seg_text:
+                    text_parts.append(seg_text)
             
             full_text = " ".join(text_parts).strip()
+            
+            # Post-transcription hallucination filter
+            if self._is_hallucination(full_text):
+                log.info(f"Rejected hallucination: '{full_text[:50]}'")
+                return ""
             
             elapsed_ms = (time.time() - start_time) * 1000
             

@@ -57,25 +57,27 @@ VOICE_PROFILE = DATA_DIR / "voice_profile.bin"
 # Ollama server URL (local)
 OLLAMA_BASE_URL = "http://localhost:11434"
 
-# Model to use — Qwen2.5:3b (GPU-accelerated, Ultra-Fast, Great Hinglish)
-MODEL_NAME = "qwen2.5:3b"
+# Model to use — Gemma4:e4b (Google's latest, strong instruction-following, English + Hinglish)
+MODEL_NAME = "gemma4:e4b"
 
 # Ollama keep_alive (-1 = keep model pinned in GPU VRAM indefinitely)
 KEEP_ALIVE = -1
 
 # Generation parameters (GPU-First, Ultra-Fast Instant Replies)
 GENERATION_CONFIG = {
-    "temperature": 0.5,
-    "top_p": 0.8,
-    "top_k": 20,
-    "num_predict": 128,          # Short 1-3 sentence conversational replies (instant generation)
-    "num_ctx": 2048,             # 2k context window for lightning-fast TTFT
+    "temperature": 0.6,          # Slightly creative but controlled
+    "top_p": 0.85,
+    "top_k": 30,
+    "num_predict": 150,          # Short 1-4 sentence conversational replies
+    "num_ctx": 4096,             # 4k context — good for multi-turn without being slow
     "num_gpu": 99,               # Force ALL layers to 100% GPU offload (RTX 5060)
     "use_mmap": True,            # Memory mapping for faster loads
     "num_thread": 8,             # CPU thread fallback if needed
+    "repeat_penalty": 1.3,       # Prevents repetition loops like .Clear.Clear
+    "repeat_last_n": 64,         # Look back 64 tokens for repetition check
 }
 
-# STT model — faster-whisper (Large-v3-Turbo model for high accuracy Hinglish/English)
+# STT model — faster-whisper (Large-v3-Turbo model for high accuracy English/Hinglish)
 STT_MODEL = "large-v3-turbo"
 
 # ── Voice Preprocessing (VAD & Noise Reduction) ──
