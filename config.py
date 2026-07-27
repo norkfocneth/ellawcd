@@ -43,7 +43,7 @@ VOICE_PROFILE = DATA_DIR / "voice_profile.bin"
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # Model to use — Gemma4:e4b (GPU-accelerated)
-MODEL_NAME = "gemma3:4b"
+MODEL_NAME = "gemma4:e4b"
 
 # Ollama keep_alive (-1 = keep model pinned in GPU VRAM indefinitely)
 KEEP_ALIVE = -1

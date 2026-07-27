@@ -1,6 +1,6 @@
 {
   "user_name": "Arnav",
-  "model": "gemma3:4b",
+  "model": "gemma4:e4b",
   "tts_voice": "en-IN-NeerjaNeural",
   "stt_model": "base",
   "sleep_timeout": 120,
