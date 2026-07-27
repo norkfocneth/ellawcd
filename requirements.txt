@@ -1,6 +1,6 @@
 # ──────────────────────────────────────────────
 # Project Ella v1.0 — Dependencies
-# Phase 1: Foundation
+# Phase 1-3: Foundation + Memory + Voice + Session
 # ──────────────────────────────────────────────
 
 # ── Core ───────────────────────────────────────
@@ -9,14 +9,15 @@ loguru>=0.7.0             # Structured logging
 rich>=13.0.0              # Beautiful terminal UI
 python-dotenv>=1.0.0      # Environment variables
 
-# ── Future Phases (install when needed) ────────
-# Phase 2: Voice
-# faster-whisper>=1.0.0   # STT (GPU)
-# edge-tts>=6.1.0         # TTS
-# sounddevice>=0.4.6      # Microphone capture
-# numpy>=1.24.0           # Audio processing
-# resemblyzer>=0.1.3      # Speaker verification
+# ── Voice Output (TTS) ────────────────────────
+edge-tts>=6.1.0           # Neural TTS (Microsoft Edge)
 
+# ── Voice Input (STT) ─────────────────────────
+faster-whisper>=1.0.0     # Whisper STT (GPU/CPU)
+sounddevice>=0.4.6        # Microphone capture
+numpy>=1.24.0             # Audio processing
+
+# ── Future Phases (install when needed) ────────
 # Phase 4: Tool Calling
 # psutil>=5.9.0           # Process management
 
