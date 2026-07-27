@@ -41,15 +41,27 @@ class WhisperSTT:
         try:
             from faster_whisper import WhisperModel
             
-            # Try GPU first (CUDA), fallback to CPU
+            # Check if CUDA is actually usable (cuBLAS DLLs must be present)
+            use_gpu = False
             try:
-                self.model = WhisperModel(
-                    self.model_size,
-                    device="cuda",
-                    compute_type="float16"
-                )
-                log.info(f"WhisperSTT loaded — model: {self.model_size} (GPU/CUDA)")
+                import ctranslate2
+                if "cuda" in ctranslate2.get_supported_compute_types("cuda"):
+                    use_gpu = True
             except Exception:
+                use_gpu = False
+            
+            if use_gpu:
+                try:
+                    self.model = WhisperModel(
+                        self.model_size,
+                        device="cuda",
+                        compute_type="float16"
+                    )
+                    log.info(f"WhisperSTT loaded — model: {self.model_size} (GPU/CUDA)")
+                except Exception:
+                    use_gpu = False
+            
+            if not use_gpu:
                 self.model = WhisperModel(
                     self.model_size,
                     device="cpu",
