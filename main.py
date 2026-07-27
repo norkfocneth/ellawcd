@@ -69,6 +69,7 @@ def boot_sequence():
         ("Loading Brain", "bold yellow", 0.5),
         ("Loading Memory", "bold cyan", 0.3),
         ("Loading Voice", "bold green", 0.3),
+        ("Loading Session", "bold blue", 0.2),
     ]
     
     for step_name, style, delay in steps:
@@ -115,7 +116,7 @@ def boot_sequence():
     console.print(
         Panel(
             f"[bold green]Ready.[/bold green]\n"
-            f"[dim]Model: {MODEL_NAME} │ Mode: Text + Voice │ User: {USER_NAME}[/dim]",
+            f"[dim]Model: {MODEL_NAME} │ Mode: Text + Voice │ Sleep: 2 min │ User: {USER_NAME}[/dim]",
             border_style="green",
             padding=(0, 2),
         )

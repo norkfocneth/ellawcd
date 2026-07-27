@@ -1,15 +1,16 @@
 # ──────────────────────────────────────────────
 # Project Ella v1.0 — Conversation Manager
-# Text input + Brain + Memory + Voice TTS output
+# Text input + Brain + Memory + Voice + Session
 # ──────────────────────────────────────────────
 
 import re
 import uuid
 
 from brain.gemma import GemmaBrain
-from brain.prompts import SYSTEM_PROMPT, get_greeting, MSG_GOODBYE
+from brain.prompts import SYSTEM_PROMPT, get_greeting, MSG_GOODBYE, MSG_SLEEPING, MSG_WAKING
 from memory import Memory
 from voice.tts import TextToSpeech
+from session import SessionManager, SessionState
 from logger import get_logger
 from events import event_bus, Event
 
@@ -20,26 +21,33 @@ class ConversationManager:
     """
     Manages the chat loop between user and Ella.
     
-    Phase 2: Text Input → Brain + Persistent Memory DB + Neural TTS Voice Output
+    Phase 3: Text Input + Brain + Memory + Voice + Session Lifecycle
+    
+    Session States:
+        ACTIVE   → Normal chat mode (text + voice)
+        SLEEPING → Auto-sleeps after 2 min inactivity
+        EXIT     → Clean shutdown on bye/exit
     """
 
     def __init__(self, brain: GemmaBrain):
         self.brain = brain
         self.memory = Memory()
         self.tts = TextToSpeech()
+        self.session = SessionManager()
         self.is_active = False
         self.message_count = 0
         self.session_id = str(uuid.uuid4())[:8]
         
-        # Build system prompt with memory context (once, cleanly)
+        # Register sleep/wake callbacks
+        self.session.on_sleep(self._handle_sleep)
+        self.session.on_wake(self._handle_wake)
+        
+        # Build system prompt with memory context
         self._build_full_system_prompt()
-        log.info("ConversationManager initialized with Memory & TTS Voice")
+        log.info("ConversationManager initialized — Phase 3 ready")
 
     def _build_full_system_prompt(self):
-        """
-        Build the full system prompt from base prompt + memory context.
-        Does NOT keep appending — rebuilds from scratch each time.
-        """
+        """Build full system prompt from base + memory context (no duplication)."""
         try:
             full_prompt = SYSTEM_PROMPT
             
@@ -53,26 +61,29 @@ class ConversationManager:
         except Exception as e:
             log.error(f"Error building system prompt: {e}")
 
+    # ═══════════════════════════════════════════
+    # MAIN CHAT LOOP
+    # ═══════════════════════════════════════════
+
     def start(self) -> None:
-        """Start the interactive text conversation loop."""
+        """Start the interactive conversation loop with session lifecycle."""
         self.is_active = True
         
-        # Track session
+        # Track session in memory DB
         self.memory.start_session(self.session_id)
         
-        # Emit session start event
-        event_bus.emit(Event(
-            name="SessionStateChanged",
-            source="conversation",
-            data={"old_state": "boot", "new_state": "active"}
-        ))
+        # Set session to ACTIVE
+        self.session.set_state(SessionState.ACTIVE)
         
-        # Display and speak greeting
+        # Start inactivity timer (auto-sleep after 2 min)
+        self.session.start_inactivity_timer()
+        
+        # Greet the user
         greeting = get_greeting()
-        self._display_ella_response(greeting)
+        self._display_ella(greeting)
         self.tts.speak(greeting, block=False)
         
-        log.info("Conversation started — text + voice mode")
+        log.info("Conversation started — text + voice + session mode")
         
         # Main chat loop
         while self.is_active:
@@ -85,9 +96,15 @@ class ConversationManager:
                 if not user_input.strip():
                     continue
                 
+                # Reset inactivity timer on any input
+                self.session.reset_inactivity()
+                
+                # If Ella was sleeping, wake message was already shown by callback
+                # Just continue to process the message
+                
                 # Check for exit commands
                 if self._is_exit_command(user_input):
-                    self._display_ella_response(MSG_GOODBYE)
+                    self._display_ella(MSG_GOODBYE)
                     self.tts.speak(MSG_GOODBYE, block=True)
                     break
                 
@@ -96,31 +113,23 @@ class ConversationManager:
                 
             except KeyboardInterrupt:
                 print()
-                self._display_ella_response(MSG_GOODBYE)
+                self._display_ella(MSG_GOODBYE)
                 break
         
+        # Clean shutdown
         self.is_active = False
-        
-        # End session tracking
-        self.memory.end_session(
-            self.session_id,
-            message_count=self.message_count
-        )
-        
-        # Close memory DB cleanly
+        self.session.shutdown()
+        self.memory.end_session(self.session_id, message_count=self.message_count)
         self.memory.close()
         
-        # Emit session end event
-        event_bus.emit(Event(
-            name="SessionStateChanged",
-            source="conversation",
-            data={"old_state": "active", "new_state": "exit"}
-        ))
-        
-        log.info(f"Conversation ended — {self.message_count} messages exchanged")
+        log.info(f"Conversation ended — {self.message_count} messages")
+
+    # ═══════════════════════════════════════════
+    # MESSAGE PROCESSING
+    # ═══════════════════════════════════════════
 
     def _process_message(self, user_input: str) -> str:
-        """Process user message: stream response, save to memory, speak out loud."""
+        """Process user message: stream → clean → save → speak."""
         self.message_count += 1
         
         log.info(f"User: {user_input[:80]}")
@@ -135,25 +144,25 @@ class ConversationManager:
         # Stream response from brain
         raw_response = self._get_streamed_response(user_input)
         
-        # Strip any stray code/json blocks from response
+        # Strip any stray code/json blocks
         clean_response = self._strip_code_blocks(raw_response)
         
-        # Save to permanent memory DB
+        # Save to memory DB
         self.memory.save_conversation(
             user_input, clean_response,
             session_id=self.session_id
         )
         
-        # Trim conversation history to prevent context window overflow
+        # Trim conversation history to prevent context overflow
         self.brain.trim_conversation(keep_last=30)
         
-        # Speak Ella's reply out loud (non-blocking so user can type next)
+        # Speak out loud (non-blocking)
         self.tts.speak(clean_response, block=False)
         
         return clean_response
 
     def _get_streamed_response(self, user_input: str) -> str:
-        """Stream response from brain and display tokens in real-time."""
+        """Stream response from brain with real-time display."""
         from rich.console import Console
         console = Console()
         
@@ -165,12 +174,11 @@ class ConversationManager:
         for chunk in self.brain.chat_stream(user_input):
             full_response += chunk
             
-            # Track code block state to suppress printing hidden blocks
+            # Suppress hidden code blocks from terminal display
             if "```" in chunk:
                 if in_code_block:
                     in_code_block = False
                     continue
-                # Check if this is a ella_memory or json block
                 remaining = full_response[full_response.rfind("```"):]
                 if any(tag in remaining.lower() for tag in ["ella_memory", "json"]):
                     in_code_block = True
@@ -184,14 +192,34 @@ class ConversationManager:
         console.print()
         return full_response
 
+    # ═══════════════════════════════════════════
+    # SLEEP / WAKE HANDLERS
+    # ═══════════════════════════════════════════
+
+    def _handle_sleep(self) -> None:
+        """Called when session transitions to SLEEPING."""
+        self._display_ella(MSG_SLEEPING)
+        self.tts.speak(MSG_SLEEPING, block=False)
+        log.info("Ella going to sleep — waiting for user input to wake")
+
+    def _handle_wake(self) -> None:
+        """Called when session transitions from SLEEPING to ACTIVE."""
+        self._display_ella(MSG_WAKING)
+        self.tts.speak(MSG_WAKING, block=False)
+        log.info("Ella woke up — back to active mode")
+
+    # ═══════════════════════════════════════════
+    # UI HELPERS
+    # ═══════════════════════════════════════════
+
     def _strip_code_blocks(self, text: str) -> str:
-        """Remove all code blocks (```...```) from response text."""
+        """Remove all code blocks from response text."""
         cleaned = re.sub(r'```(?:ella_memory|json)?\s*\n.*?\n```', '', text, flags=re.DOTALL)
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         return cleaned
 
-    def _display_ella_response(self, text: str) -> None:
-        """Display a pre-formatted Ella response (not from brain)."""
+    def _display_ella(self, text: str) -> None:
+        """Display Ella's message in terminal."""
         from rich.console import Console
         console = Console()
         console.print(f"\n  [bold magenta]Ella[/bold magenta]  {text}")
@@ -201,7 +229,12 @@ class ConversationManager:
         try:
             from rich.console import Console
             console = Console()
-            user_input = console.input("\n  [bold cyan]You[/bold cyan]   ")
+            
+            # Show sleeping indicator if Ella is asleep
+            if self.session.is_sleeping():
+                user_input = console.input("\n  [dim]zzz...[/dim] [bold cyan]You[/bold cyan]   ")
+            else:
+                user_input = console.input("\n  [bold cyan]You[/bold cyan]   ")
             return user_input
         except EOFError:
             return None
@@ -215,7 +248,7 @@ class ConversationManager:
         return text.strip().lower() in exit_commands
 
     def send_message(self, message: str) -> str:
-        """Send a message programmatically (not from user input loop)."""
+        """Send a message programmatically."""
         self.message_count += 1
         response = self.brain.chat(message)
         return response
