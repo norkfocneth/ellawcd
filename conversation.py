@@ -5,6 +5,8 @@
 
 from brain.gemma import GemmaBrain
 from brain.prompts import get_greeting, MSG_GOODBYE
+from memory import Memory
+from voice.tts import TextToSpeech
 from logger import get_logger
 from events import event_bus, Event
 
@@ -15,8 +17,7 @@ class ConversationManager:
     """
     Manages the chat loop between user and Ella.
     
-    Phase 1: Text-only input/output via terminal.
-    Phase 2+: Will integrate with voice (STT/TTS).
+    Phase 2: Text Input → Brain + Persistent Memory DB + Neural TTS Voice Output!
     
     Usage:
         brain = GemmaBrain()
@@ -26,15 +27,34 @@ class ConversationManager:
 
     def __init__(self, brain: GemmaBrain):
         """
-        Initialize conversation manager.
-        
-        Args:
-            brain: GemmaBrain instance for generating responses
+        Initialize conversation manager with Memory and Voice.
         """
         self.brain = brain
+        self.memory = Memory()
+        self.tts = TextToSpeech()
         self.is_active = False
         self.message_count = 0
-        log.info("ConversationManager initialized")
+        
+        # Inject stored facts and memory context into Gemma system prompt
+        self._inject_memory_context()
+        log.info("ConversationManager initialized with Memory & TTS Voice")
+
+    def _inject_memory_context(self):
+        """Load stored facts and past conversations from DB into brain's context."""
+        try:
+            mem_context = self.memory.build_memory_context()
+            fact_extract_instructions = self.memory.extract_facts_prompt()
+            
+            if mem_context:
+                self.brain.system_prompt += f"\n\n{mem_context}"
+            self.brain.system_prompt += f"\n\n{fact_extract_instructions}"
+            
+            # Re-init conversation with updated system prompt
+            self.brain._init_conversation()
+            log.info("Memory context & fact extraction instructions loaded into Brain")
+        except Exception as e:
+            log.error(f"Error injecting memory context: {e}")
+
 
     def start(self) -> None:
         """
@@ -51,9 +71,11 @@ class ConversationManager:
             data={"old_state": "boot", "new_state": "active"}
         ))
         
-        # Display greeting
+        # Display and speak greeting
         greeting = get_greeting()
         self._display_ella_response(greeting)
+        self.tts.speak(greeting, block=False)
+
         
         log.info("Conversation started — text mode")
         
@@ -96,17 +118,11 @@ class ConversationManager:
 
     def _process_message(self, user_input: str) -> str:
         """
-        Process a single user message and get response.
-        
-        Args:
-            user_input: The user's text
-            
-        Returns:
-            Ella's response text
+        Process user message: Get Brain response, save to Memory, speak out loud!
         """
         self.message_count += 1
         
-        log.info(f"User: {user_input[:80]}{'...' if len(user_input) > 80 else ''}")
+        log.info(f"User: {user_input[:80]}")
         
         # Emit user message event
         event_bus.emit(Event(
@@ -115,16 +131,23 @@ class ConversationManager:
             data={"text": user_input, "source": "text", "confidence": 1.0}
         ))
         
-        # Get response from brain (streamed for real-time display)
-        response = self._get_streamed_response(user_input)
+        # Stream response from brain
+        raw_response = self._get_streamed_response(user_input)
         
-        return response
+        # Parse and save any auto-extracted facts from response
+        clean_response = self.memory.parse_and_save_facts(raw_response)
+        
+        # Save to permanent memory DB
+        self.memory.save_conversation(user_input, clean_response)
+        
+        # Speak Ella's reply out loud!
+        self.tts.speak(clean_response, block=False)
+        
+        return clean_response
 
     def _get_streamed_response(self, user_input: str) -> str:
         """
         Get and display a streamed response from the brain.
-        
-        Shows each token as it arrives for a real-time feel.
         """
         from rich.console import Console
         console = Console()
@@ -136,15 +159,18 @@ class ConversationManager:
         
         # Stream tokens
         for chunk in self.brain.chat_stream(user_input):
+            # Don't print hidden memory JSON blocks to terminal
+            if "```ella_memory" in chunk or "```" in chunk and "ella_memory" in full_response:
+                full_response += chunk
+                continue
             console.print(chunk, end="", highlight=False)
             full_response += chunk
         
         # Final newline
         console.print()
         
-        log.info(f"Ella: {full_response[:80]}{'...' if len(full_response) > 80 else ''}")
-        
         return full_response
+
 
     def _display_ella_response(self, text: str) -> None:
         """Display a pre-formatted Ella response (not from brain)."""

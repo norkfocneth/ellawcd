@@ -12,9 +12,11 @@ ENV/
 # Data & Logs
 data/logs/*
 !data/logs/.gitkeep
+data/cache/
 data/voice_profile.bin
-*.db
-*.sqlite
+*.db*
+*.sqlite*
+
 
 # IDE & OS
 .vscode/

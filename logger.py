@@ -24,7 +24,8 @@ def setup_logger():
     logger.remove()
     
     # ── Console Handler ────────────────────────
-    # Colored, concise format for terminal
+    # Only WARNING and ERROR messages appear in terminal to keep chat clean.
+    # All INFO/DEBUG logs are stored silently in file logs.
     logger.add(
         sys.stdout,
         format=(
@@ -33,23 +34,10 @@ def setup_logger():
             "<cyan>{extra[module]: <20}</cyan> │ "
             "<level>{message}</level>"
         ),
-        level=LOG_LEVEL,
+        level="WARNING",
         colorize=True,
-        filter=lambda record: record["extra"].get("module", "") != "",
     )
-    
-    # Fallback for logs without module context
-    logger.add(
-        sys.stdout,
-        format=(
-            "<green>{time:HH:mm:ss}</green> │ "
-            "<level>{level: <8}</level> │ "
-            "<level>{message}</level>"
-        ),
-        level=LOG_LEVEL,
-        colorize=True,
-        filter=lambda record: record["extra"].get("module", "") == "",
-    )
+
     
     # ── File Handler ───────────────────────────
     # Detailed format, rotated, with full timestamps
