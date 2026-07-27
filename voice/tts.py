@@ -108,6 +108,9 @@ class TextToSpeech(BaseTTS):
             import onnxruntime as ort
             from kokoro_onnx import Kokoro
             
+            # Suppress verbose ONNX Runtime warnings (red/green text on Windows)
+            ort.set_default_logger_severity(3)
+            
             # Check for CUDA GPU provider availability
             available_providers = ort.get_available_providers()
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'CUDAExecutionProvider' in available_providers else ['CPUExecutionProvider']

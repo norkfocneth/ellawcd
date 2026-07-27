@@ -164,6 +164,12 @@ class ConversationManager:
                     self._switch_to_text_mode()
                     continue
                 
+                if cmd == "reset":
+                    self.brain.reset_conversation()
+                    self._display_ella("Conversation memory cleared. Let's start fresh!")
+                    self.tts.speak("Memory cleared. Let's start fresh.", block=False)
+                    continue
+                
                 if self._is_exit_command(cmd):
                     self._display_ella(MSG_GOODBYE)
                     self.tts.speak(MSG_GOODBYE, block=True)
