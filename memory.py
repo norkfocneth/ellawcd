@@ -102,6 +102,17 @@ class Memory:
             )
         """)
         
+        # ── Vector Embeddings Table ────────────────
+        # Storing floats for hybrid vector database integration (Phase 11 vector readiness)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vector_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_id INTEGER NOT NULL,
+                content_type TEXT NOT NULL,       -- 'conversation' or 'fact'
+                embedding BLOB NOT NULL           -- Serialized float array (struct binary)
+            )
+        """)
+        
         self.conn.commit()
 
     # ═══════════════════════════════════════════

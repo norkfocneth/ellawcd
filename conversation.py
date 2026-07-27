@@ -184,12 +184,16 @@ class ConversationManager:
 
     def _get_voice_input(self) -> str | None:
         """Get voice input from microphone → STT transcription."""
+        import time
         from rich.console import Console
         console = Console()
         
         if self.listener is None or self.stt is None:
             self._switch_to_text_mode()
             return self._get_text_input()
+        
+        # Brief pause to ensure speakers are completely silent before opening mic
+        time.sleep(0.4)
         
         # Show listening indicator
         console.print("\n  [bold green]Listening...[/bold green] [dim](speak now)[/dim]", end="")
@@ -198,7 +202,6 @@ class ConversationManager:
         audio = self.listener.listen_once()
         
         if audio is None:
-            # No speech detected within timeout — just re-listen
             console.print("\r  [dim]...waiting for voice...[/dim]                              ", end="\r")
             return ""
         
@@ -229,12 +232,12 @@ class ConversationManager:
             self.voice_mode = True
             msg = "Voice mode activated. Main tumhari awaaz sun rahi hoon. Bolo!"
             self._display_ella(msg)
-            self.tts.speak(msg, block=False)
+            self.tts.speak(msg, block=True)  # Wait for speech to finish before mic opens!
             console.print("  [dim]Say 'text mode' or type Ctrl+C to switch back[/dim]")
         else:
             msg = "Sorry, microphone ya STT model load nahi ho paya. Text mode me rehte hain."
             self._display_ella(msg)
-            self.tts.speak(msg, block=False)
+            self.tts.speak(msg, block=True)
             self.voice_mode = False
 
     def _switch_to_text_mode(self):
@@ -273,6 +276,12 @@ class ConversationManager:
         
         raw_response = self._get_streamed_response(user_input)
         clean_response = self._strip_code_blocks(raw_response)
+        
+        # If response was empty after stripping, set friendly fallback
+        if not clean_response:
+            clean_response = "Haan, bolo, main sun rahi hoon!"
+            from rich.console import Console
+            Console().print(clean_response)
         
         self.memory.save_conversation(
             user_input, clean_response, session_id=self.session_id

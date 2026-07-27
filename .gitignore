@@ -23,3 +23,9 @@ data/voice_profile.bin
 .idea/
 .DS_Store
 Thumbs.db
+
+data/kokoro/
+data/settings.json
+*.onnx
+*.bin
+

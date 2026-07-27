@@ -31,6 +31,22 @@ class WhisperSTT:
         self.model = None
         self._load_model()
 
+    def _add_cuda_dll_paths(self):
+        """Add NVIDIA CUDA site-packages DLL paths to PATH and DLL search path."""
+        import sys
+        import os
+        from pathlib import Path
+        site_packages_nvidia = Path(sys.executable).parent / "Lib" / "site-packages" / "nvidia"
+        if site_packages_nvidia.exists():
+            for bin_dir in site_packages_nvidia.glob("*/bin"):
+                bin_path_str = str(bin_dir.resolve())
+                if bin_path_str not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = bin_path_str + os.path.pathsep + os.environ.get("PATH", "")
+                try:
+                    os.add_dll_directory(bin_path_str)
+                except Exception:
+                    pass
+
     def _load_model(self):
         """Load the faster-whisper model."""
         import warnings
@@ -38,30 +54,22 @@ class WhisperSTT:
         os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
         warnings.filterwarnings("ignore")
         
+        # Ensure NVIDIA CUDA DLLs are accessible
+        self._add_cuda_dll_paths()
+        
         try:
             from faster_whisper import WhisperModel
             
-            # Check if CUDA is actually usable (cuBLAS DLLs must be present)
-            use_gpu = False
+            # Try GPU first (CUDA), fallback to CPU
             try:
-                import ctranslate2
-                if "cuda" in ctranslate2.get_supported_compute_types("cuda"):
-                    use_gpu = True
-            except Exception:
-                use_gpu = False
-            
-            if use_gpu:
-                try:
-                    self.model = WhisperModel(
-                        self.model_size,
-                        device="cuda",
-                        compute_type="float16"
-                    )
-                    log.info(f"WhisperSTT loaded — model: {self.model_size} (GPU/CUDA)")
-                except Exception:
-                    use_gpu = False
-            
-            if not use_gpu:
+                self.model = WhisperModel(
+                    self.model_size,
+                    device="cuda",
+                    compute_type="float16"
+                )
+                log.info(f"WhisperSTT loaded — model: {self.model_size} (GPU/CUDA)")
+            except Exception as gpu_err:
+                log.warning(f"GPU STT failed ({gpu_err}), falling back to CPU")
                 self.model = WhisperModel(
                     self.model_size,
                     device="cpu",
@@ -91,6 +99,11 @@ class WhisperSTT:
         start_time = time.time()
         
         try:
+            # Apply noisereduce (DSP Spectral Gating)
+            from voice.noise import NoiseReducer
+            reducer = NoiseReducer(sample_rate=sample_rate)
+            audio = reducer.reduce_noise(audio)
+            
             # Ensure audio is float32 and correct shape
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
@@ -99,14 +112,15 @@ class WhisperSTT:
             if np.abs(audio).max() > 1.0:
                 audio = audio / np.abs(audio).max()
             
-            # Transcribe (greedy search beam_size=1 for ultra-fast response)
+            # Transcribe with language="en" for accurate Hinglish/English Latin script
             segments, info = self.model.transcribe(
                 audio,
-                beam_size=1,
+                beam_size=3,
                 language="en",
+                initial_prompt="Hello Ella. Kaise ho? Kya kar rahi ho?",
                 vad_filter=True,           # Voice Activity Detection filter
                 vad_parameters=dict(
-                    min_silence_duration_ms=300,
+                    min_silence_duration_ms=400,
                 ),
             )
             

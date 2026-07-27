@@ -4,9 +4,24 @@
 # ──────────────────────────────────────────────
 
 import os
+import sys
 import json
 import warnings
 from pathlib import Path
+
+# Add CUDA DLL paths globally for ONNX Runtime/Torch
+def _add_cuda_dll_paths_global():
+    site_packages_nvidia = Path(sys.executable).parent / "Lib" / "site-packages" / "nvidia"
+    if site_packages_nvidia.exists():
+        for bin_dir in site_packages_nvidia.glob("*/bin"):
+            bin_path_str = str(bin_dir.resolve())
+            if bin_path_str not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = bin_path_str + os.path.pathsep + os.environ.get("PATH", "")
+            try:
+                os.add_dll_directory(bin_path_str)
+            except Exception:
+                pass
+_add_cuda_dll_paths_global()
 
 # Suppress HuggingFace cache/symlink warnings
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -42,8 +57,8 @@ VOICE_PROFILE = DATA_DIR / "voice_profile.bin"
 # Ollama server URL (local)
 OLLAMA_BASE_URL = "http://localhost:11434"
 
-# Model to use — Gemma4:e4b (GPU-accelerated)
-MODEL_NAME = "gemma4:e4b"
+# Model to use — Qwen2.5:3b (GPU-accelerated, Ultra-Fast, Great Hinglish)
+MODEL_NAME = "qwen2.5:3b"
 
 # Ollama keep_alive (-1 = keep model pinned in GPU VRAM indefinitely)
 KEEP_ALIVE = -1
@@ -60,8 +75,19 @@ GENERATION_CONFIG = {
     "num_thread": 8,             # CPU thread fallback if needed
 }
 
-# STT model — faster-whisper (tiny for sub-second transcription speed)
-STT_MODEL = "tiny.en"
+# STT model — faster-whisper (Large-v3-Turbo model for high accuracy Hinglish/English)
+STT_MODEL = "large-v3-turbo"
+
+# ── Voice Preprocessing (VAD & Noise Reduction) ──
+VAD_MODEL_PATH = DATA_DIR / "silero_vad.onnx"
+VAD_THRESHOLD = 0.5            # Speech probability threshold for Silero VAD
+NOISE_REDUCE_ENABLED = True     # Use noisereduce spectral gating
+NOISE_REDUCE_PROP = 0.8         # Noise reduction proportion (0.8 = 80% reduction)
+
+# ── Voice Output (Kokoro TTS) ───────────────────
+KOKORO_MODEL_DIR = DATA_DIR / "kokoro"
+KOKORO_VOICE = "af_heart"       # Default voice (American English female, warm and clear)
+KOKORO_SPEED = 1.0              # Voice output speed factor
 
 
 # ── User ───────────────────────────────────────
@@ -79,13 +105,12 @@ SLEEP_TIMEOUT = 120
 WAKE_WORD = "ella"
 
 
-# ── Voice (Phase 2) ───────────────────────────
+# ── Voice (Phase 2 / Kokoro Upgrade) ───────────
 
-# TTS voice — Indian English female
-TTS_VOICE = "en-IN-NeerjaNeural"
+# Keep compatibility with old code where TTS_VOICE / TTS_RATE are used
+TTS_VOICE = "af_heart"
+TTS_RATE = "1.0"
 
-# TTS speech rate — +35% faster (matches natural human conversational speed)
-TTS_RATE = "+35%"
 
 
 

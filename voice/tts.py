@@ -1,42 +1,131 @@
 # ──────────────────────────────────────────────
 # Project Ella v1.0 — Text-To-Speech (TTS)
-# Powered by edge-tts (Natural Indian English female voice)
+# Powered by Kokoro-TTS (100% Offline, GPU-Accelerated)
 # ──────────────────────────────────────────────
 
-import asyncio
-import subprocess
 import os
 import sys
 import time
-import tempfile
+import urllib.request
 from pathlib import Path
-
-
-from config import TTS_VOICE, TTS_RATE, DATA_DIR
 from logger import get_logger
 from events import event_bus, Event
+from config import KOKORO_MODEL_DIR, KOKORO_VOICE, KOKORO_SPEED, DATA_DIR
 
 log = get_logger("voice.tts")
 
 
-class TextToSpeech:
+class BaseTTS:
+    """Abstract Base Class for modular TTS engines."""
+    def speak(self, text: str, block: bool = True) -> bool:
+        raise NotImplementedError
+
+
+class TextToSpeech(BaseTTS):
     """
-    Ella's voice output engine using edge-tts.
+    Ella's local voice output engine using Kokoro-TTS.
     
-    Generates natural-sounding speech from text using Microsoft Edge's
-    neural TTS engine (free, high-quality).
+    Generates natural-sounding speech from text using the Kokoro-82M model
+    running offline via ONNX Runtime with CUDA GPU acceleration.
     
-    Default Voice: en-IN-NeerjaNeural (Indian English female)
+    Supports dynamic voice packs (e.g. af_heart, af_bella, am_adam, pm_alex).
     """
 
-    def __init__(self, voice: str = None, rate: str = None):
-        self.voice = voice or TTS_VOICE
-        self.rate = rate or TTS_RATE
-        self.temp_dir = DATA_DIR / "cache"
-        self.temp_dir.mkdir(exist_ok=True)
+    def __init__(self, voice: str = None, speed: float = None):
+        self.voice = voice or KOKORO_VOICE
+        self.speed = speed or KOKORO_SPEED
+        self.model_dir = Path(KOKORO_MODEL_DIR)
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.model_path = self.model_dir / "kokoro-v1.0.onnx"
+        self.voices_path = self.model_dir / "voices-v1.0.bin"
+        
+        self.kokoro = None
         self.enabled = True
-        log.info(f"TextToSpeech initialized — voice: {self.voice}, rate: {self.rate}")
+        
+        # Trigger lazy-load check
+        self._ensure_model_files_exist()
 
+    def _ensure_model_files_exist(self):
+        """Checks if Kokoro ONNX model and voice packs are downloaded. Downloads if missing."""
+        model_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+        voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+        
+        try:
+            if not self.model_path.exists():
+                log.info(f"Downloading Kokoro ONNX model to {self.model_path} (this happens only once)...")
+                self._download_file(model_url, self.model_path)
+                
+            if not self.voices_path.exists():
+                log.info(f"Downloading Kokoro voice packs to {self.voices_path} (this happens only once)...")
+                self._download_file(voices_url, self.voices_path)
+                
+        except Exception as e:
+            log.error(f"Failed to download Kokoro models: {e}")
+            self.enabled = False
+
+    def _download_file(self, url: str, dest_path: Path):
+        """Helper to download a file with progress logging."""
+        import requests
+        from rich.progress import Progress, BarColumn, DownloadColumn, TextColumn, TimeRemainingColumn
+        
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_dest = dest_path.with_suffix(".tmp")
+        
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+        
+        with Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TimeRemainingColumn(),
+            transient=True
+        ) as progress:
+            task = progress.add_task(f"Downloading {dest_path.name}...", total=total_size)
+            
+            with open(temp_dest, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        progress.update(task, advance=len(chunk))
+                        
+        if temp_dest.exists():
+            temp_dest.rename(dest_path)
+            log.info(f"Successfully downloaded {dest_path.name}")
+
+    def _lazy_load(self):
+        """Lazy loads Kokoro model onto GPU (CUDA ONNX Provider)."""
+        if self.kokoro is not None:
+            return
+            
+        if not self.enabled:
+            return
+            
+        try:
+            log.info("Initializing Kokoro TTS engine...")
+            import onnxruntime as ort
+            from kokoro_onnx import Kokoro
+            
+            # Check for CUDA GPU provider availability
+            available_providers = ort.get_available_providers()
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'CUDAExecutionProvider' in available_providers else ['CPUExecutionProvider']
+            
+            log.info(f"ONNX Execution Providers: {providers}")
+            
+            # Load ONNX model with selected providers
+            self.kokoro = Kokoro(
+                model_path=str(self.model_path),
+                voices_path=str(self.voices_path),
+            )
+            # Explicitly force ORT session providers to leverage CUDA if present
+            self.kokoro.sess.set_providers(providers)
+            
+            log.info("Kokoro TTS engine ready.")
+        except Exception as e:
+            log.error(f"Error loading Kokoro TTS: {e}")
+            self.enabled = False
 
     def speak(self, text: str, block: bool = True) -> bool:
         """
@@ -52,102 +141,53 @@ class TextToSpeech:
         if not self.enabled or not text.strip():
             return False
             
-        # Clean text for speech (strip markdown, emojis, code blocks)
+        # Clean text for speech
         clean_text = self._clean_text_for_speech(text)
         if not clean_text:
             return False
             
-        log.info(f"Speaking: '{clean_text[:60]}{'...' if len(clean_text) > 60 else ''}'")
-        
-        # Audio file path
-        audio_file = str(self.temp_dir / "ella_reply.mp3")
+        log.info(f"Speaking (local Kokoro): '{clean_text[:60]}{'...' if len(clean_text) > 60 else ''}'")
         
         try:
-            # Generate MP3 using edge-tts CLI or async API
-            success = self._generate_audio(clean_text, audio_file)
+            self._lazy_load()
+            if self.kokoro is None:
+                return False
+                
+            start_time = time.time()
             
-            if success and os.path.exists(audio_file):
-                # Emit event
-                event_bus.emit(Event(
-                    name="VoiceReply",
-                    source="voice.tts",
-                    data={"text": clean_text, "voice": self.voice}
-                ))
-                
-                # Play the generated audio file
-                self._play_audio(audio_file, block=block)
-                return True
-            return False
+            # Generate raw audio float32 numpy array
+            samples, sample_rate = self.kokoro.create(
+                text=clean_text,
+                voice=self.voice,
+                speed=self.speed,
+                lang="en-us"
+            )
             
-        except Exception as e:
-            log.error(f"TTS Error: {e}")
-            return False
-
-    def _generate_audio(self, text: str, output_file: str) -> bool:
-        """Generate MP3 audio file from text using edge-tts with retries."""
-        cmd = [
-            sys.executable, "-m", "edge_tts",
-            "--voice", self.voice,
-            "--rate", self.rate,
-            "--text", text,
-            "--write-media", output_file
-        ]
-        
-        # Retry up to 3 times in case of temporary network socket reset
-        for attempt in range(3):
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                
-                if result.returncode == 0 and os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                    return True
-                
-                time.sleep(0.5)
-            except Exception:
-                time.sleep(0.5)
-                
-        return False
-
-
-    def _play_audio(self, audio_file: str, block: bool = True) -> None:
-        """
-        Play an MP3 file on Windows using PowerShell MediaPlayer (no extra dependencies).
-        """
-        abs_path = os.path.abspath(audio_file).replace("\\", "/")
-        
-        # PowerShell script using System.Windows.Media.MediaPlayer
-        ps_script = f"""
-        Add-Type -AssemblyName presentationCore
-        $player = New-Object System.Windows.Media.MediaPlayer
-        $player.Open([Uri]"{abs_path}")
-        $player.Play()
-        Start-Sleep -Milliseconds 300
-        while ($player.NaturalDuration.HasTimeSpan -eq $false) {{ Start-Sleep -Milliseconds 100 }}
-        $duration = $player.NaturalDuration.TimeSpan.TotalSeconds
-        Start-Sleep -Seconds $duration
-        $player.Close()
-        """
-        
-        try:
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script]
+            generation_time = time.time() - start_time
+            log.debug(f"Audio generated in {generation_time:.3f}s (Speed factor: {len(samples)/sample_rate/generation_time:.1f}x)")
+            
+            # Emit event
+            event_bus.emit(Event(
+                name="VoiceReply",
+                source="voice.tts",
+                data={"text": clean_text, "voice": self.voice}
+            ))
+            
+            # Play the generated audio instantly in-memory using sounddevice
+            import sounddevice as sd
+            sd.play(samples, sample_rate)
             
             if block:
-                subprocess.run(cmd, capture_output=True, timeout=30)
-            else:
-                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                sd.wait()
                 
+            return True
+            
         except Exception as e:
-            log.error(f"Error playing audio: {e}")
+            log.error(f"Kokoro TTS generation/playback error: {e}")
+            return False
 
     def _clean_text_for_speech(self, text: str) -> str:
-        """
-        Clean markdown formatting, code blocks, emojis, and symbols
-        so TTS speaks natural sentences.
-        """
+        """Clean markdown formatting, code blocks, emojis, and symbols."""
         import re
         
         # Remove code blocks ```...```
@@ -163,11 +203,12 @@ class TextToSpeech:
         # Remove JSON memory blocks if any left
         text = re.sub(r'```ella_memory.*?```', '', text, flags=re.DOTALL)
         
-        # Remove ALL emojis and Unicode symbols so TTS never speaks emoji names
+        # Remove ALL emojis and Unicode symbols
         emoji_pattern = re.compile(
             "["
             "\U00010000-\U0010FFFF"  # Emojis & pictographs
             "\u2600-\u27BF"          # Misc symbols & dingbats
+            "\u2300-\u23FF"          # Tech symbols
             "\u2300-\u23FF"          # Tech symbols
             "\u2B00-\u2BFF"          # Misc symbols
             "]+", flags=re.UNICODE
@@ -179,3 +220,10 @@ class TextToSpeech:
         
         return text.strip()
 
+
+if __name__ == "__main__":
+    # Test script
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    tts = TextToSpeech()
+    tts.speak("Hello Arnav! Kokoro is fully running offline on our local laptop GPU. It is super fast and crystal clear.")
