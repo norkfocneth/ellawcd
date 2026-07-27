@@ -76,8 +76,13 @@ WAKE_WORD = "ella"
 # TTS voice — Indian English female
 TTS_VOICE = "en-IN-NeerjaNeural"
 
+# TTS speech rate — +35% faster (matches natural human conversational speed)
+TTS_RATE = "+35%"
+
+
 # STT model — faster-whisper
 STT_MODEL = "base"
+
 
 
 # ── Logging ────────────────────────────────────

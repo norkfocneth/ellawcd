@@ -135,7 +135,11 @@ class ConversationManager:
         raw_response = self._get_streamed_response(user_input)
         
         # Parse and save any auto-extracted facts from response
-        clean_response = self.memory.parse_and_save_facts(raw_response)
+        clean_response, facts_updated = self.memory.parse_and_save_facts(raw_response)
+        
+        # If new/updated facts learned, re-inject memory into system prompt immediately
+        if facts_updated:
+            self._inject_memory_context()
         
         # Save to permanent memory DB
         self.memory.save_conversation(user_input, clean_response)
@@ -144,6 +148,7 @@ class ConversationManager:
         self.tts.speak(clean_response, block=False)
         
         return clean_response
+
 
     def _get_streamed_response(self, user_input: str) -> str:
         """

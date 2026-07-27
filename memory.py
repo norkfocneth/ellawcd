@@ -331,80 +331,17 @@ class Memory:
     # ═══════════════════════════════════════════
 
     def extract_facts_prompt(self) -> str:
-        """
-        Returns a prompt instruction for the brain to extract facts
-        from conversation. This is appended to the system prompt.
-        """
-        return f"""
-## IMPORTANT: Memory & Fact Extraction
+        """Disabled for now as requested — pure text conversation."""
+        return ""
 
-After EVERY response, you MUST analyze the user's message for personal information.
-If you detect ANY of the following, output a hidden JSON block at the END of your response:
-
-Categories to watch for:
-- name, nickname, age, birthday
-- food preferences, favorite dishes, drinks
-- music, movies, shows, games
-- projects (like Stella, coding work, school projects)
-- habits, daily routine, sleep schedule
-- style, clothing, aesthetic preferences
-- relationships (friends, family)
-- mood, feelings, emotions
-- goals, dreams, ambitions
-- skills, languages, tech stack
-- location, school, workplace
-- pet peeves, dislikes
-
-Format (ONLY when you detect new facts):
-```ella_memory
-[{{"category": "food", "fact": "{USER_NAME} loves biryani"}}, {{"category": "project", "fact": "{USER_NAME} is building Stella AI project"}}]
-```
-
-Rules:
-- ONLY output this block when you detect NEW personal information.
-- The block must be at the VERY END of your response.
-- The user should NOT see this block (it will be stripped).
-- Be specific and detailed in facts.
-- Update existing knowledge if user corrects something.
-"""
-
-    def parse_and_save_facts(self, response: str) -> str:
-        """
-        Parse Ella's response for hidden fact extraction blocks.
-        Saves extracted facts to memory and returns the clean response.
-        
-        Args:
-            response: Raw response from the brain (may contain ella_memory block)
-            
-        Returns:
-            Clean response with memory block stripped
-        """
+    def parse_and_save_facts(self, response: str) -> tuple[str, bool]:
+        """Strip any stray json/memory blocks if present."""
         import re
-        
-        # Look for ella_memory JSON block
-        pattern = r'```ella_memory\s*\n(.*?)\n```'
-        match = re.search(pattern, response, re.DOTALL)
-        
-        if match:
-            try:
-                facts_json = match.group(1).strip()
-                facts = json.loads(facts_json)
-                
-                for fact_data in facts:
-                    category = fact_data.get("category", "general")
-                    fact_text = fact_data.get("fact", "")
-                    if fact_text:
-                        self.save_fact(category, fact_text, source="auto_extract")
-                        log.debug(f"Auto-extracted fact: [{category}] {fact_text}")
-                
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                log.debug(f"Fact extraction parse error (non-critical): {e}")
-            
-            # Strip the memory block from the response
-            clean_response = re.sub(pattern, '', response, flags=re.DOTALL).strip()
-            return clean_response
-        
-        return response
+        pattern = r'```(?:ella_memory|json)?\s*\n(.*?)\n```'
+        clean_response = re.sub(pattern, '', response, flags=re.DOTALL).strip()
+        return clean_response, False
+
+
 
     def close(self):
         """Close database connection."""

@@ -7,10 +7,12 @@ import asyncio
 import subprocess
 import os
 import sys
+import time
 import tempfile
 from pathlib import Path
 
-from config import TTS_VOICE, DATA_DIR
+
+from config import TTS_VOICE, TTS_RATE, DATA_DIR
 from logger import get_logger
 from events import event_bus, Event
 
@@ -25,18 +27,16 @@ class TextToSpeech:
     neural TTS engine (free, high-quality).
     
     Default Voice: en-IN-NeerjaNeural (Indian English female)
-    
-    Usage:
-        tts = TextToSpeech()
-        tts.speak("Hi Arnav! Main Ella. Ready hoon.")
     """
 
-    def __init__(self, voice: str = None):
+    def __init__(self, voice: str = None, rate: str = None):
         self.voice = voice or TTS_VOICE
+        self.rate = rate or TTS_RATE
         self.temp_dir = DATA_DIR / "cache"
         self.temp_dir.mkdir(exist_ok=True)
         self.enabled = True
-        log.info(f"TextToSpeech initialized — voice: {self.voice}")
+        log.info(f"TextToSpeech initialized — voice: {self.voice}, rate: {self.rate}")
+
 
     def speak(self, text: str, block: bool = True) -> bool:
         """
@@ -84,32 +84,34 @@ class TextToSpeech:
             return False
 
     def _generate_audio(self, text: str, output_file: str) -> bool:
-        """Generate MP3 audio file from text using edge-tts."""
-        try:
-            # Run edge-tts via python -m edge_tts CLI for maximum reliability
-            cmd = [
-                sys.executable, "-m", "edge_tts",
-                "--voice", self.voice,
-                "--text", text,
-                "--write-media", output_file
-            ]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            
-            if result.returncode == 0 and os.path.exists(output_file):
-                return True
-            else:
-                log.error(f"edge-tts error: {result.stderr}")
-                return False
+        """Generate MP3 audio file from text using edge-tts with retries."""
+        cmd = [
+            sys.executable, "-m", "edge_tts",
+            "--voice", self.voice,
+            "--rate", self.rate,
+            "--text", text,
+            "--write-media", output_file
+        ]
+        
+        # Retry up to 3 times in case of temporary network socket reset
+        for attempt in range(3):
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
                 
-        except Exception as e:
-            log.error(f"Failed to generate audio: {e}")
-            return False
+                if result.returncode == 0 and os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                    return True
+                
+                time.sleep(0.5)
+            except Exception:
+                time.sleep(0.5)
+                
+        return False
+
 
     def _play_audio(self, audio_file: str, block: bool = True) -> None:
         """
