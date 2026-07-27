@@ -99,14 +99,14 @@ class WhisperSTT:
             if np.abs(audio).max() > 1.0:
                 audio = audio / np.abs(audio).max()
             
-            # Transcribe
+            # Transcribe (greedy search beam_size=1 for ultra-fast response)
             segments, info = self.model.transcribe(
                 audio,
-                beam_size=5,
+                beam_size=1,
                 language="en",
                 vad_filter=True,           # Voice Activity Detection filter
                 vad_parameters=dict(
-                    min_silence_duration_ms=500,
+                    min_silence_duration_ms=300,
                 ),
             )
             

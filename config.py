@@ -48,18 +48,20 @@ MODEL_NAME = "gemma4:e4b"
 # Ollama keep_alive (-1 = keep model pinned in GPU VRAM indefinitely)
 KEEP_ALIVE = -1
 
-# Generation parameters (GPU-First, Ultra-Fast)
+# Generation parameters (GPU-First, Ultra-Fast Instant Replies)
 GENERATION_CONFIG = {
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "top_k": 40,
-    "num_predict": 512,          # max tokens to generate
-    "num_ctx": 4096,             # 4k context window for ultra-fast TTFT
+    "temperature": 0.5,
+    "top_p": 0.8,
+    "top_k": 20,
+    "num_predict": 128,          # Short 1-3 sentence conversational replies (instant generation)
+    "num_ctx": 2048,             # 2k context window for lightning-fast TTFT
     "num_gpu": 99,               # Force ALL layers to 100% GPU offload (RTX 5060)
     "use_mmap": True,            # Memory mapping for faster loads
     "num_thread": 8,             # CPU thread fallback if needed
 }
 
+# STT model — faster-whisper (tiny for sub-second transcription speed)
+STT_MODEL = "tiny.en"
 
 
 # ── User ───────────────────────────────────────
@@ -84,10 +86,6 @@ TTS_VOICE = "en-IN-NeerjaNeural"
 
 # TTS speech rate — +35% faster (matches natural human conversational speed)
 TTS_RATE = "+35%"
-
-
-# STT model — faster-whisper
-STT_MODEL = "base"
 
 
 
