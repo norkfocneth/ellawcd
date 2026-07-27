@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Portable Python / Environments
+.python/
+.venv/
+venv/
+ENV/
+
+# Data & Logs
+data/logs/*
+!data/logs/.gitkeep
+data/voice_profile.bin
+*.db
+*.sqlite
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

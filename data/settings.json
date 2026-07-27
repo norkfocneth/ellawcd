@@ -1,0 +1,13 @@
+{
+  "user_name": "Arnav",
+  "model": "gemma3:4b",
+  "tts_voice": "en-IN-NeerjaNeural",
+  "stt_model": "base",
+  "sleep_timeout": 120,
+  "wake_word": "ella",
+  "theme": "dark",
+  "language": "hinglish",
+  "verbose": false,
+  "favourite_browser": "chrome",
+  "favourite_editor": "vscode"
+}
