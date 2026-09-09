@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ──────────────────────────────────────────────
-# Project Ella v1.0 — Main Entry Point
-# Boot sequence + launch conversation
+# ELLA-WCD v2.0 — Main Entry Point
+# Autonomous Self-Learning Browser Agent
 # ──────────────────────────────────────────────
 
 import sys
@@ -25,178 +25,123 @@ from events import event_bus, Event
 log = get_logger("main")
 console = Console()
 
-
 # ── ASCII Art Logo ─────────────────────────────
 
-ELLA_LOGO = """
- ███████╗██╗     ██╗      █████╗ 
- ██╔════╝██║     ██║     ██╔══██╗
- █████╗  ██║     ██║     ███████║
- ██╔══╝  ██║     ██║     ██╔══██║
- ███████╗███████╗███████╗██║  ██║
- ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝
+ELLA_WCD_LOGO = """
+ ███████╗██╗     ██╗      █████╗     ██╗    ██╗ ██████╗██████╗ 
+ ██╔════╝██║     ██║     ██╔══██╗    ██║    ██║██╔════╝██╔══██╗
+ █████╗  ██║     ██║     ███████║    ██║ █╗ ██║██║     ██║  ██║
+ ██╔══╝  ██║     ██║     ██╔══██║    ██║███╗██║██║     ██║  ██║
+ ███████╗███████╗███████╗██║  ██║    ╚███╔███╔╝╚██████╗██████╔╝
+ ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝     ╚══╝╚══╝  ╚═════╝╚═════╝ 
 """
 
 
 def boot_sequence():
     """
-    Display the animated boot sequence.
-    
-    Shows:
-        Loading Ella...
-        Loading Brain...
-        Loading Memory...
-        Loading Voice...
-        Loading Vision...
-        Ready.
+    Diagnostic boot sequence for ELLA-WCD v2.0.
+    Checks Ollama Brain, WebCMD Browser daemon, and SQLite memory.
     """
     console.clear()
-    
-    # ── Logo ───────────────────────────────────
-    logo_text = Text(ELLA_LOGO, style="bold magenta")
+
+    # ── Header ─────────────────────────────────
+    logo_text = Text(ELLA_WCD_LOGO, style="bold cyan")
     console.print(Align.center(logo_text))
-    
-    tagline = Text(f"  {TAGLINE}  ", style="dim italic")
+
+    tagline = Text(f"  {TAGLINE}  ", style="bold white on blue")
     console.print(Align.center(tagline))
-    
-    version_text = Text(f"  v{VERSION}  ", style="dim")
-    console.print(Align.center(version_text))
-    console.print()
-    
-    # ── Loading Steps ──────────────────────────
-    steps = [
-        ("Loading Ella", "bold white", 0.3),
-        ("Loading Brain", "bold yellow", 0.5),
-        ("Loading Memory", "bold cyan", 0.3),
-        ("Loading Voice", "bold green", 0.3),
-        ("Loading Session", "bold blue", 0.2),
-    ]
-    
-    for step_name, style, delay in steps:
-        console.print(f"  [{style}]●[/{style}] {step_name}...", end="")
-        time.sleep(delay)
-        console.print(f" [green]✓[/green]")
 
-    
+    ver_text = Text(f"  v{VERSION} │ Windows CLI Edition  ", style="dim")
+    console.print(Align.center(ver_text))
     console.print()
-    
-    # ── Check Ollama / Brain ───────────────────
-    console.print("  [bold yellow]●[/bold yellow] Connecting to Brain...", end="")
-    
-    from brain.gemma import GemmaBrain
-    brain = GemmaBrain()
-    
+
+    # ── Diagnostic Checks ──────────────────────
+    console.print("  [bold yellow]●[/bold yellow] Checking Ollama Brain...", end="")
+    from brain.qwen import QwenBrain
+    brain = QwenBrain()
+
     if brain.is_available():
-        console.print(f" [green]✓[/green] [dim]({MODEL_NAME} connected)[/dim]")
-        console.print("  [bold yellow]●[/bold yellow] Warming up GPU VRAM...", end="")
-        brain.warmup()
-        console.print(f" [green]✓[/green] [dim](Pinned to RTX 5060 GPU VRAM)[/dim]")
-        brain_ready = True
-
+        console.print(f" [green]✓[/green] [dim]({brain.active_model} online)[/dim]")
     else:
-        console.print(f" [red]✗[/red] [dim](Ollama not available)[/dim]")
-        console.print()
+        console.print(f" [red]✗[/red] [dim](Ollama not reachable on :11434)[/dim]")
         console.print(
             Panel(
-                "[yellow]Ollama server nahi chal raha.[/yellow]\n\n"
-                "Fix karne ke liye:\n"
-                "  1. Ollama install karo: [cyan]https://ollama.com[/cyan]\n"
-                f"  2. Model pull karo: [cyan]ollama pull {MODEL_NAME}[/cyan]\n"
-                "  3. Server start karo: [cyan]ollama serve[/cyan]\n"
-                "  4. Fir Ella chalao: [cyan]python main.py[/cyan]",
-                title="[red]Brain Connection Failed[/red]",
+                "[yellow]Ollama server is not responding.[/yellow]\n\n"
+                "To resolve:\n"
+                "  1. Start Ollama: [cyan]ollama serve[/cyan]\n"
+                f"  2. Verify model: [cyan]ollama run {MODEL_NAME}[/cyan]\n"
+                "  3. Restart ELLA: [cyan]python main.py[/cyan]",
+                title="[red]Brain Connection Issue[/red]",
                 border_style="red",
                 padding=(1, 2),
             )
         )
         return None
-    
-    # ── Ready ──────────────────────────────────
+
+    console.print("  [bold yellow]●[/bold yellow] Checking WebCMD Browser Engine...", end="")
+    from automation.webcmd_bridge import WebcmdBridge
+    webcmd = WebcmdBridge()
+    doc = webcmd.check_doctor()
+
+    if doc.get("ok"):
+        console.print(" [green]✓[/green] [dim](Cloak stealth browser ready)[/dim]")
+    else:
+        console.print(f" [yellow]![/yellow] [dim]({doc.get('error', 'Status OK')})[/dim]")
+
+    console.print("  [bold yellow]●[/bold yellow] Connecting Memory Store...", end="")
+    from memory import Memory
+    mem = Memory()
+    console.print(f" [green]✓[/green] [dim]({Path(mem.db_path).name})[/dim]")
+
+    console.print("  [bold yellow]●[/bold yellow] Voice Subsystem...", end="")
+    console.print(" [dim italic]Disabled (Text/CLI Mode)[/dim italic]")
+
+    # ── Status Panel ───────────────────────────
     console.print()
     console.print(
         Panel(
-            f"[bold green]Ready.[/bold green]\n"
-            f"[dim]Model: {MODEL_NAME} │ Mode: Text + Voice │ Sleep: 2 min │ User: {USER_NAME}[/dim]",
+            f"[bold green]ELLA-WCD System Ready.[/bold green]\n"
+            f"[dim]Brain: {brain.active_model}  │  Browser: WebCMD Cloak  │  Vision: Qwen3-VL Fallback  │  Operator: {USER_NAME}[/dim]",
             border_style="green",
             padding=(0, 2),
         )
     )
-    console.print()
-    
-    log.info(f"Boot complete — model: {MODEL_NAME}, user: {USER_NAME}")
-    
-    # Emit boot event
-    event_bus.emit(Event(
-        name="SessionStateChanged",
-        source="main",
-        data={"old_state": "boot", "new_state": "active"}
-    ))
-    
+
+    log.info(f"Boot complete — model: {brain.active_model}, user: {USER_NAME}")
     return brain
 
 
-def print_help():
-    """Display help information."""
-    console.print()
-    console.print(
-        Panel(
-            "[bold]Commands:[/bold]\n"
-            "  [cyan]Just type naturally[/cyan] — Chat with Ella\n"
-            "  [cyan]exit / bye / quit[/cyan]  — Exit Ella\n"
-            "  [cyan]stop ella[/cyan]          — Shutdown Ella\n"
-            "\n"
-            "[bold]Examples:[/bold]\n"
-            '  "Good morning"\n'
-            '  "Explain Python decorators"\n'
-            '  "Motivate me"\n'
-            '  "Translate this to Hindi"\n',
-            title="[magenta]Ella Help[/magenta]",
-            border_style="magenta",
-            padding=(1, 2),
-        )
-    )
-
-
 def main():
-    """Main entry point for Project Ella."""
-    
-    # ── Handle CLI Arguments ───────────────────
+    """Main entry point for ELLA-WCD."""
     if "--help" in sys.argv or "-h" in sys.argv:
-        print_help()
+        from conversation import ConversationManager
+        from brain.qwen import QwenBrain
+        b = QwenBrain()
+        cm = ConversationManager(b)
+        cm._print_help()
         return 0
-    
-    if "--test" in sys.argv:
-        console.print("[yellow]Running self-check...[/yellow]")
-        import setup
-        return setup.main()
-    
-    if "--version" in sys.argv:
-        console.print(f"Ella v{VERSION}")
+
+    if "--version" in sys.argv or "-v" in sys.argv:
+        console.print(f"{APP_NAME} v{VERSION}")
         return 0
-    
-    # ── Boot Sequence ──────────────────────────
+
     try:
         brain = boot_sequence()
-        
         if brain is None:
             return 1
-        
-        # ── Start Conversation ─────────────────
+
         from conversation import ConversationManager
         convo = ConversationManager(brain)
         convo.start()
-        
         return 0
-        
+
     except KeyboardInterrupt:
-        console.print("\n\n  [dim]Ella shut down.[/dim]")
-        log.info("Ella shut down via Ctrl+C")
+        console.print("\n\n  [dim]ELLA-WCD session ended.[/dim]\n")
+        log.info("ELLA-WCD terminated by user")
         return 0
-        
     except Exception as e:
-        log.error(f"Fatal error: {e}")
-        console.print(f"\n  [red]Fatal Error:[/red] {e}")
-        console.print("  [dim]Check logs in data/logs/ for details.[/dim]")
+        log.error(f"Fatal startup error: {e}")
+        console.print(f"\n  [red]Fatal Error:[/red] {e}\n")
         return 1
 
 

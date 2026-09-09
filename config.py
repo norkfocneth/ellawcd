@@ -57,27 +57,31 @@ VOICE_PROFILE = DATA_DIR / "voice_profile.bin"
 # Ollama server URL (local)
 OLLAMA_BASE_URL = "http://localhost:11434"
 
-# Model to use — Gemma4:e4b (Google's latest, strong instruction-following, English + Hinglish)
-MODEL_NAME = "gemma4:e4b"
+# Model to use — Qwen2.5-VL 7B (Vision + Reasoning + Browser Tool Calling)
+MODEL_NAME = "qwen2.5vl:7b"
 
 # Ollama keep_alive (-1 = keep model pinned in GPU VRAM indefinitely)
 KEEP_ALIVE = -1
 
-# Generation parameters (GPU-First, Ultra-Fast Instant Replies)
+# Generation parameters (GPU-First, Precise Agent Output)
 GENERATION_CONFIG = {
-    "temperature": 0.6,          # Slightly creative but controlled
+    "temperature": 0.2,          # Low temperature for accurate tool use and planning
     "top_p": 0.85,
     "top_k": 30,
-    "num_predict": 150,          # Short 1-4 sentence conversational replies
-    "num_ctx": 4096,             # 4k context — good for multi-turn without being slow
-    "num_gpu": 99,               # Force ALL layers to 100% GPU offload (RTX 5060)
-    "use_mmap": True,            # Memory mapping for faster loads
-    "num_thread": 8,             # CPU thread fallback if needed
-    "repeat_penalty": 1.3,       # Prevents repetition loops like .Clear.Clear
-    "repeat_last_n": 64,         # Look back 64 tokens for repetition check
+    "num_predict": 512,          # Sufficient for structured responses
+    "num_ctx": 8192,             # 8k context for rich page summaries
+    "num_gpu": 99,               # Force layers to GPU offload
+    "use_mmap": True,            # Memory mapping
+    "num_thread": 8,             # CPU fallback if needed
 }
 
-# STT model — faster-whisper (Large-v3-Turbo model for high accuracy English/Hinglish)
+# ── WebCMD Browser Agent ──────────────────────
+WEBCMD_PROFILE = "default"
+WEBCMD_HEADLESS = True
+BROWSER_TIMEOUT = 30
+
+# ── Voice (Disabled for Hackathon MVP) ─────────
+VOICE_ENABLED = False
 STT_MODEL = "large-v3-turbo"
 
 # ── Voice Preprocessing (VAD & Noise Reduction) ──
@@ -88,7 +92,7 @@ NOISE_REDUCE_PROP = 0.8         # Noise reduction proportion (0.8 = 80% reductio
 
 # ── Voice Output (Kokoro TTS) ───────────────────
 KOKORO_MODEL_DIR = DATA_DIR / "kokoro"
-KOKORO_VOICE = "af_heart"       # Default voice (American English female, warm and clear)
+KOKORO_VOICE = "af_heart"       # Default voice
 KOKORO_SPEED = 1.0              # Voice output speed factor
 
 
@@ -107,15 +111,6 @@ SLEEP_TIMEOUT = 120
 WAKE_WORD = "ella"
 
 
-# ── Voice (Phase 2 / Kokoro Upgrade) ───────────
-
-# Keep compatibility with old code where TTS_VOICE / TTS_RATE are used
-TTS_VOICE = "af_heart"
-TTS_RATE = "1.0"
-
-
-
-
 # ── Logging ────────────────────────────────────
 
 # Log level
@@ -130,10 +125,12 @@ LOG_RETENTION = "7 days"
 
 # ── Version ────────────────────────────────────
 
-VERSION = "1.0.0"
-APP_NAME = "Ella"
-TAGLINE = "Your Personal Offline AI Desktop Assistant"
+VERSION = "2.0.0"
+APP_NAME = "ELLA-WCD"
+TAGLINE = "Autonomous Self-Learning Browser Agent"
 
+
+TTS_VOICE = "af_heart"
 
 # ── Settings Loader ───────────────────────────
 
@@ -142,6 +139,8 @@ def load_settings() -> dict:
     defaults = {
         "user_name": USER_NAME,
         "model": MODEL_NAME,
+        "webcmd_profile": WEBCMD_PROFILE,
+        "headless": WEBCMD_HEADLESS,
         "tts_voice": TTS_VOICE,
         "stt_model": STT_MODEL,
         "sleep_timeout": SLEEP_TIMEOUT,
