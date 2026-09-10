@@ -29,7 +29,9 @@ BROWSER_INTENT_KEYWORDS = [
     "extract", "compare", "lookup", "website", "url", "http", "www", "article",
     "summary", "price", "documentation", "scrape", "google", "brave", "bravesearch",
     "laptop", "laptops", "amazon", "flipkart", "croma", "ecommerce", "buy", "store",
-    "deal", "deals", "dhoondo", "khojo", "dekho", "kholo", "batao"
+    "deal", "deals", "dhoondo", "khojo", "dekho", "kholo", "batao",
+    "download", "install", "extension", "extensions", "wallet", "metamask",
+    "addon", "addons", "plugin", "setup", "get"
 ]
 
 

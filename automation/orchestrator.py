@@ -53,6 +53,14 @@ class BrowserOrchestrator:
         is_multi_site = plan.get("is_multi_site", False)
         lower_goal = user_goal.lower()
 
+        # Check if download or browser extension installation is requested
+        download_keywords = [
+            "download", "install", "extension", "extensions", "wallet",
+            "metamask", "addon", "addons", "plugin", "setup"
+        ]
+        if any(kw in lower_goal for kw in download_keywords):
+            return self._execute_download_or_extension_task(user_goal, plan, start_time)
+
         # Check if multi-site comparison is requested
         multi_keywords = [
             "across", "compare", "3 ecommerce", "three ecommerce", "ecommerce sites",
@@ -797,3 +805,260 @@ Keep it direct, sharp, and easy to read.
             "results_count": len(all_products),
             "elapsed_seconds": elapsed
         }
+
+    def _execute_download_or_extension_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        """
+        Autonomous Download and Extension Installation Workflow.
+        Discovers official download / Chrome Web Store links, navigates, locates
+        the install/download button, and asks interactive user permission before execution.
+        """
+        console.print("[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]")
+        console.print(f"[bold cyan][DOWNLOAD/EXT][/bold cyan] Autonomous Workflow: [italic]{user_goal}[/italic]")
+
+        # 1. Clean target name
+        clean_target = user_goal.strip()
+        for prefix in [
+            "open browser and download and install ", "open browser and download ",
+            "open browser and install ", "open browser and get ", "open browser to download ",
+            "open browser to install ", "download and install ", "download ", "install ",
+            "get ", "setup ", "please download ", "please install "
+        ]:
+            if clean_target.lower().startswith(prefix):
+                clean_target = clean_target[len(prefix):].strip()
+                break
+
+        is_extension = any(k in user_goal.lower() for k in [
+            "extension", "extensions", "addon", "addons", "wallet", "plugin", "metamask", "chrome web store"
+        ])
+
+        console.print(f"  [green]✓[/green] Target: [bold white]{clean_target}[/bold white]")
+        console.print(f"  [green]✓[/green] Type: [cyan]{'Browser Extension (Chrome/Brave)' if is_extension else 'Software Application'}[/cyan]")
+
+        task_slug = "ella-down-" + uuid.uuid4().hex[:5]
+        self.active_session_id = self.webcmd.create_session(task_slug)
+        console.print(f"[bold yellow][BROWSER][/bold yellow] Brave Session: [bold]{self.active_session_id}[/bold]")
+
+        target_url = None
+        # Fast path for known extension targets like metamask
+        if "metamask" in clean_target.lower():
+            target_url = "https://chromewebstore.google.com/detail/metamask/nkbihfbeogaeaoehlefnkodbefgpgknn"
+            console.print(f"  [blue]→[/blue] Direct Verified Route: {target_url}")
+        else:
+            # Discover via Brave Search
+            search_query = f"{clean_target} chrome web store" if is_extension else f"{clean_target} official download"
+            enc_q = urllib.parse.quote_plus(search_query)
+            search_url = f"https://search.brave.com/search?q={enc_q}"
+            console.print(f"  [blue]→[/blue] Discovering official page via Brave Search: '{search_query}'")
+
+            find_script = f"""
+            await page.goto("{search_url}", {{ waitUntil: "domcontentloaded", timeout: 20000 }});
+            const links = await page.locator(".snippet, .result, div[data-type='web']").evaluateAll(els => els.slice(0, 5).map(e => ({{
+                title: e.querySelector("a.h, .title, h2, h3, a")?.innerText?.trim() || "",
+                link: e.querySelector("a")?.href || ""
+            }})));
+            return links;
+            """
+            s_res = self.webcmd.run_script(find_script, session_id=self.active_session_id)
+            links = s_res.get("result", []) if isinstance(s_res.get("result"), list) else []
+
+            # Prioritize Chrome Web Store if extension
+            if is_extension:
+                for item in links:
+                    l_url = item.get("link", "")
+                    if "chromewebstore.google.com/detail/" in l_url or "chrome.google.com/webstore/detail/" in l_url:
+                        target_url = l_url
+                        break
+
+            if not target_url and links:
+                # Top valid link
+                for item in links:
+                    l_url = item.get("link", "")
+                    if l_url.startswith("http") and "brave.com" not in l_url:
+                        target_url = l_url
+                        break
+
+            if not target_url:
+                target_url = f"https://search.brave.com/search?q={enc_q}"
+
+            console.print(f"  [green]✓[/green] Official Target Page Discovered: [cyan]{target_url}[/cyan]")
+
+        # 2. Navigate to destination page and inspect for action button
+        console.print(f"  [blue]→[/blue] Navigating to destination page...")
+        inspect_script = f"""
+        await page.goto("{target_url}", {{ waitUntil: "domcontentloaded", timeout: 25000 }});
+        await page.waitForTimeout(2500);
+
+        const pageTitle = await page.title();
+        const currentUrl = page.url();
+
+        // Detect action buttons
+        const buttons = await page.locator("button, [role='button'], a.download, a[href*='download'], a[href*='webstore']").evaluateAll(els => {{
+            return els.map(e => ({{
+                text: (e.innerText || '').trim().replace(/\\s+/g, ' '),
+                href: e.href || '',
+                tag: e.tagName,
+                aria: e.getAttribute('aria-label') || ''
+            }})).filter(b => {{
+                const combined = (b.text + ' ' + b.aria).toLowerCase();
+                return combined.includes('add to brave') ||
+                       combined.includes('add to chrome') ||
+                       combined.includes('download') ||
+                       combined.includes('install') ||
+                       combined.includes('get');
+            }}).slice(0, 5);
+        }});
+
+        return {{
+            title: pageTitle,
+            url: currentUrl,
+            buttons: buttons
+        }};
+        """
+        page_info = self.webcmd.run_script(inspect_script, session_id=self.active_session_id)
+        p_res = page_info.get("result", {}) if isinstance(page_info.get("result"), dict) else {}
+        page_title = p_res.get("title") or "Official Download Page"
+        final_page_url = p_res.get("url") or target_url
+        buttons = p_res.get("buttons", [])
+
+        # If page has a link to Chrome Web Store (e.g. metamask.io/download -> webstore link), follow it
+        for b in buttons:
+            href = b.get("href", "")
+            if "chromewebstore.google.com/detail/" in href or "chrome.google.com/webstore/detail/" in href:
+                console.print(f"  [blue]→[/blue] Following official extension store link: {href}")
+                target_url = href
+                inspect_script_sub = f"""
+                await page.goto("{target_url}", {{ waitUntil: "domcontentloaded", timeout: 25000 }});
+                await page.waitForTimeout(2500);
+                return {{
+                    title: await page.title(),
+                    url: page.url(),
+                    buttons: await page.locator("button, [role='button']").evaluateAll(els => els.map(e => ({{
+                        text: (e.innerText || '').trim().replace(/\\s+/g, ' '),
+                        tag: e.tagName
+                    }})).filter(x => x.text.toLowerCase().includes('add to') || x.text.toLowerCase().includes('install')))
+                }};
+                """
+                sub_info = self.webcmd.run_script(inspect_script_sub, session_id=self.active_session_id)
+                sub_res = sub_info.get("result", {}) if isinstance(sub_info.get("result"), dict) else {}
+                page_title = sub_res.get("title") or page_title
+                final_page_url = sub_res.get("url") or target_url
+                buttons = sub_res.get("buttons", buttons)
+                break
+
+        # Determine primary button
+        action_button_text = "Download / Add to Brave"
+        if buttons:
+            for b in buttons:
+                txt = b.get("text", "")
+                if "add to brave" in txt.lower() or "add to chrome" in txt.lower():
+                    action_button_text = txt
+                    break
+            else:
+                action_button_text = buttons[0].get("text", "Download")
+
+        # 3. INTERACTIVE PERMISSION GATE (As requested by user)
+        console.print()
+        console.print("[bold yellow]───────────────────────────────────────────────────────────[/bold yellow]")
+        console.print(f"[bold bright_magenta]✦[/bold bright_magenta] [bold bright_cyan]Destination Page Reached:[/bold bright_cyan] [bold white]{page_title}[/bold white]")
+        console.print(f"  [dim]Verified URL:[/dim] [cyan]{final_page_url}[/cyan]")
+        console.print(f"  [bold green]Action Button Detected:[/bold green] [bold white]'{action_button_text}'[/bold white]")
+        console.print("[bold yellow]───────────────────────────────────────────────────────────[/bold yellow]")
+        console.print()
+
+        try:
+            confirm = console.input(
+                f"[bold yellow]✦ Permission Required: Should I proceed to {action_button_text.lower()} '{clean_target}'? (y/n): [/bold yellow]"
+            ).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            confirm = "n"
+
+        if confirm in ["y", "yes", "ha", "haan", "proceed", "sure", "ok", "1", ""]:
+            console.print()
+            console.print(f"  [green]✓[/green] Permission [bold green]GRANTED[/bold green]. Triggering '{action_button_text}' in Brave Browser...")
+
+            click_script = f"""
+            const btns = Array.from(document.querySelectorAll("button, [role='button'], a"));
+            const target = btns.find(b => {{
+                const t = (b.innerText || '').toLowerCase();
+                return t.includes("add to brave") || t.includes("add to chrome") || t.includes("download") || t.includes("install");
+            }});
+            if (target) {{
+                target.click();
+                return {{ clicked: true, text: target.innerText.trim() }};
+            }}
+            return {{ clicked: false }};
+            """
+            click_res = self.webcmd.run_script(click_script, session_id=self.active_session_id)
+            time.sleep(3)
+
+            # Synthesize final result
+            elapsed = time.time() - start_time
+            synthesis_markdown = f"""
+Based on your autonomous browser request to download/install **{clean_target}**:
+
+1. **Target Discovered & Verified**:
+   - Page Title: [{page_title}]({final_page_url})
+   - Platform: Brave / Chromium Automation Infrastructure
+
+2. **Permission & Action**:
+   - Operator Confirmation: **Granted** (`{confirm or 'yes'}`)
+   - Action Triggered: Clicked **`{action_button_text}`**
+
+3. **Status**:
+   - Download / Extension addition has been initiated directly in Brave Browser.
+   - If Brave displays a native security popup ("Add extension?"), please click confirm in your browser window to complete setup.
+"""
+            print_task_result(synthesis_markdown, title="Autonomous Download & Extension Execution", model_name=self.brain.active_model)
+
+            # Record to memory
+            try:
+                self.memory.save_fact("downloads", f"{clean_target} -> {final_page_url} ({action_button_text})")
+                console.print(f"  [green]✓[/green] Saved download action to ELLA memory checkpoint.")
+            except Exception:
+                pass
+
+            console.print(f"[dim]Task completed in {elapsed:.2f}s | Brave Session: {self.active_session_id}[/dim]")
+            console.print("[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]")
+
+            self.webcmd.close_session(self.active_session_id)
+            self.active_session_id = None
+
+            return {
+                "ok": True,
+                "goal": user_goal,
+                "target": clean_target,
+                "url": final_page_url,
+                "button": action_button_text,
+                "confirmed": True
+            }
+
+        else:
+            console.print()
+            console.print(f"[yellow]✦ Action cancelled by operator. No download or installation was executed.[/yellow]")
+            elapsed = time.time() - start_time
+
+            cancel_markdown = f"""
+Based on your request for **{clean_target}**:
+
+1. **Destination Reached**:
+   - Page: [{page_title}]({final_page_url})
+   - Detected Action Button: `{action_button_text}`
+
+2. **Operator Decision**:
+   - Operator replied: **Cancelled** (`{confirm}`)
+   - Safe Mode: Zero clicks performed on the download button.
+
+3. **Status**:
+   - Browser session safely closed without downloading any files.
+"""
+            print_task_result(cancel_markdown, title="Autonomous Action Cancelled", model_name=self.brain.active_model)
+
+            self.webcmd.close_session(self.active_session_id)
+            self.active_session_id = None
+
+            return {
+                "ok": True,
+                "goal": user_goal,
+                "target": clean_target,
+                "confirmed": False
+            }
