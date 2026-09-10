@@ -272,3 +272,75 @@ Output JSON only.
             log.error(f"Vision localization error: {e}")
 
         return {"found": False, "error": "Visual localization unavailable"}
+
+    def diagnose_and_recover(self, query: str, image_bytes: bytes, domain: str = "") -> Dict[str, Any]:
+        """
+        Multimodal Obstacle Diagnostician & Recovery Surgeon (Qwen2.5-VL / Qwen3-VL).
+        Inspects the screenshot of a blocked browser tab, determines if an obstacle
+        (modal dialog, cookie banner, login gate, cloudflare/bot check, or missing search input)
+        is preventing interaction/extraction, and provides exact actionable recovery instructions.
+        """
+        prompt = f"""You are the Emergency Recovery Surgeon of ELLA-WCD, an autonomous browser agent.
+The browser was attempting to search/extract information for: "{query}" on domain: "{domain or 'web page'}".
+However, the fast code was blocked or extracted 0 results.
+
+Inspect the provided screenshot carefully and diagnose what is blocking the page.
+Detect if there is:
+- A modal popup, newsletter overlay, or promo banner
+- A cookie consent / privacy banner
+- A login prompt or sign-in gate
+- A bot verification or captcha screen
+- An empty search result or incorrect page state
+- Obscured or unfocused search bar
+
+Output ONLY a JSON object with this exact schema:
+{{
+  "has_obstacle": true/false,
+  "obstacle_type": "modal_popup | cookie_banner | login_gate | bot_check | empty_results | none",
+  "description": "Short explanation of what is on screen blocking progress",
+  "recommended_action": "click | dismiss | press_key | reload | wait | none",
+  "coordinates": {{"x": 800, "y": 200}},
+  "selector": "button.close, [aria-label='Close'], etc.",
+  "key": "Escape",
+  "confidence": 0.95
+}}
+If no obstacle is visible and the page simply has no products, set "has_obstacle": false and "recommended_action": "none".
+Output JSON only with no markdown formatting.
+"""
+        user_msg = {
+            "role": "user",
+            "content": prompt,
+            "images": [base64.b64encode(image_bytes).decode("utf-8")]
+        }
+
+        payload = {
+            "model": self.active_model,
+            "messages": [
+                {"role": "system", "content": "You are a precise multimodal browser automation diagnostic engine. Always output valid JSON."},
+                user_msg
+            ],
+            "format": "json",
+            "stream": False,
+            "options": {"temperature": 0.1, "num_predict": 300}
+        }
+
+        try:
+            res = requests.post(f"{self.base_url}/api/chat", json=payload, timeout=45)
+            if res.status_code == 200:
+                text = res.json().get("message", {}).get("content", "").strip()
+                if "```" in text:
+                    text = text.split("```json")[-1].split("```")[0].strip()
+                parsed = json.loads(text)
+                return parsed
+        except Exception as e:
+            log.error(f"Visual obstacle diagnosis error: {e}")
+
+        # Safe fallback
+        return {
+            "has_obstacle": False,
+            "obstacle_type": "unknown",
+            "description": "Automated vision inspection completed without high confidence obstacle",
+            "recommended_action": "press_key",
+            "key": "Escape",
+            "confidence": 0.5
+        }

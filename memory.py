@@ -7,6 +7,7 @@
 import sqlite3
 import json
 import time
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pathlib import Path
 
@@ -110,6 +111,22 @@ class Memory:
                 content_id INTEGER NOT NULL,
                 content_type TEXT NOT NULL,       -- 'conversation' or 'fact'
                 embedding BLOB NOT NULL           -- Serialized float array (struct binary)
+            )
+        """)
+
+        # ── Learned Recipes Table ──────────────────
+        # Cached deterministic automation recipes and obstacle recoveries (Code-First)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS learned_recipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                domain TEXT NOT NULL,
+                task_pattern TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                recipe_json TEXT NOT NULL,
+                success_count INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(domain, task_pattern, action_type)
             )
         """)
         
@@ -353,6 +370,93 @@ class Memory:
         return clean_response, False
 
 
+
+    # ═══════════════════════════════════════════
+    # LEARNED RECIPES CACHE (Self-Learning Code-First)
+    # ═══════════════════════════════════════════
+
+    def save_recipe(self, domain: str, task_pattern: str, action_type: str, recipe: dict) -> int:
+        """
+        Save or update a learned browser automation / obstacle recovery recipe.
+        If recipe already exists for (domain, task_pattern, action_type),
+        increments success_count and updates recipe_json and updated_at.
+        """
+        now = datetime.now().isoformat()
+        recipe_str = json.dumps(recipe)
+        cursor = self.conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO learned_recipes (domain, task_pattern, action_type, recipe_json, success_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(domain, task_pattern, action_type) DO UPDATE SET
+                recipe_json = excluded.recipe_json,
+                success_count = learned_recipes.success_count + 1,
+                updated_at = excluded.updated_at
+        """, (domain, task_pattern, action_type, recipe_str, now, now))
+        
+        self.conn.commit()
+        log.info(f"Learned recipe saved for domain='{domain}', pattern='{task_pattern}', action='{action_type}'")
+        return cursor.lastrowid or 1
+
+    def get_recipe(self, domain: str, task_pattern: str, action_type: Optional[str] = None) -> Optional[dict]:
+        """
+        Retrieve a cached recipe for a domain and task pattern.
+        """
+        cursor = self.conn.cursor()
+        if action_type:
+            cursor.execute("""
+                SELECT recipe_json, success_count, updated_at FROM learned_recipes
+                WHERE domain = ? AND task_pattern = ? AND action_type = ?
+                ORDER BY success_count DESC LIMIT 1
+            """, (domain, task_pattern, action_type))
+        else:
+            cursor.execute("""
+                SELECT recipe_json, success_count, updated_at FROM learned_recipes
+                WHERE domain = ? AND task_pattern = ?
+                ORDER BY success_count DESC LIMIT 1
+            """, (domain, task_pattern))
+            
+        row = cursor.fetchone()
+        if row:
+            try:
+                data = json.loads(row["recipe_json"])
+                data["_success_count"] = row["success_count"]
+                data["_updated_at"] = row["updated_at"]
+                return data
+            except Exception as e:
+                log.warning(f"Failed to decode cached recipe for {domain}: {e}")
+        return None
+
+    def get_all_recipes(self, domain: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieve all learned recipes or recipes for a specific domain."""
+        cursor = self.conn.cursor()
+        if domain:
+            cursor.execute("""
+                SELECT id, domain, task_pattern, action_type, recipe_json, success_count, updated_at
+                FROM learned_recipes WHERE domain = ? ORDER BY success_count DESC
+            """, (domain,))
+        else:
+            cursor.execute("""
+                SELECT id, domain, task_pattern, action_type, recipe_json, success_count, updated_at
+                FROM learned_recipes ORDER BY success_count DESC
+            """)
+        
+        results = []
+        for row in cursor.fetchall():
+            try:
+                recipe_obj = json.loads(row["recipe_json"])
+            except Exception:
+                recipe_obj = {}
+            results.append({
+                "id": row["id"],
+                "domain": row["domain"],
+                "task_pattern": row["task_pattern"],
+                "action_type": row["action_type"],
+                "recipe": recipe_obj,
+                "success_count": row["success_count"],
+                "updated_at": row["updated_at"]
+            })
+        return results
 
     def close(self):
         """Close database connection."""

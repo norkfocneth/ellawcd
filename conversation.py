@@ -111,8 +111,12 @@ class ConversationManager:
                 console.print("[green]Browser Headless Mode: ON (Stealth background execution)[/green]")
             return True
 
-        elif root == "/memory":
+        elif root in ["/memory", "/recipes"]:
+            recipes = self.memory.get_all_recipes()
             console.print(f"[cyan]Learned Memory Store: SQLite ({self.memory.db_path})[/cyan]")
+            console.print(f"[cyan]Learned Automation Recipes: [bold green]{len(recipes)}[/bold green][/cyan]")
+            for r in recipes:
+                console.print(f"  • [bold yellow]{r['domain']}[/bold yellow] ({r['task_pattern']}): action=[green]{r['action_type']}[/green], hits=[green]{r['success_count']}x[/green]")
             return True
 
         return False
@@ -126,12 +130,13 @@ class ConversationManager:
             "  [yellow]/doctor[/yellow]           — Test WebCMD browser connectivity and stealth daemon\n"
             "  [yellow]/model [name][/yellow]    — Show or switch active Ollama brain model\n"
             "  [yellow]/headless [on|off][/yellow] — Toggle visible browser window\n"
+            "  [yellow]/recipes[/yellow]          — View cached self-learned browser automation recipes\n"
             "  [yellow]/reset[/yellow]            — Reset conversation context and clear active tabs\n"
             "  [yellow]/exit[/yellow]             — Safely close browser and exit\n\n"
             "[bold cyan]Example Tasks:[/bold cyan]\n"
+            "  • [italic]Compare best RTX 3050 laptops under 1 lakh across Amazon, Flipkart, Vijay Sales[/italic]\n"
             "  • [italic]Find 5 recent research papers about AI browser agents from arXiv[/italic]\n"
             "  • [italic]Search GitHub for trending open source web automation agents[/italic]\n"
-            "  • [italic]Compare Playwright and Selenium across speed and features[/italic]\n"
             "  • [italic]Open python.org and check the latest stable release version[/italic]",
             title="[bold magenta]ELLA-WCD v2.0 Guide[/bold magenta]",
             border_style="magenta",

@@ -9,6 +9,7 @@ import time
 import uuid
 import io
 import re
+import base64
 import urllib.parse
 from typing import Dict, Any, List, Optional
 from rich.console import Console
@@ -227,22 +228,35 @@ class BrowserOrchestrator:
         else:
             console.print(f"  [red]✗[/red] Verification check: 0 results returned.")
             console.print()
-            console.print("[bold red][RECOVER][/bold red]")
-            console.print("  [yellow]→[/yellow] Triggering Visual Grounding Fallback...")
-            try:
-                import mss
-                with mss.mss() as sct:
-                    monitor = sct.monitors[1]
-                    sct_img = sct.grab(monitor)
-                    from PIL import Image
-                    img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-                    buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=70)
-                    img_bytes = buf.getvalue()
-                    loc = self.brain.vision_localize(query_text, img_bytes)
-                    console.print(f"  [green]✓[/green] Vision localization: {loc.get('description', 'Inspected screen viewport')}")
-            except Exception as e:
-                console.print(f"  [dim]Vision fallback diagnostic: {e}[/dim]")
+            console.print("[bold red][RECOVER: On-Demand Surgeon][/bold red]")
+            domain = urllib.parse.urlparse(current_url).netloc
+            
+            # 1. Check self-learning recipe cache
+            cached_recipe = self.memory.get_recipe(domain, "obstacle_recovery")
+            if cached_recipe:
+                console.print(f"  [bold green]⚡ Self-Learning Cache Hit ({domain}):[/bold green] Replaying learned recovery action (0s LLM latency)")
+                self._apply_recovery_action(0, cached_recipe)
+            else:
+                console.print(f"  [yellow]→[/yellow] Capturing tab screenshot for visual diagnosis...")
+                try:
+                    snap_res = self.webcmd.run_script("""
+                    const b64 = (await page.screenshot({ type: 'jpeg', quality: 60 })).toString('base64');
+                    return { screenshot_b64: b64 };
+                    """, session_id=self.active_session_id, timeout=10)
+                    if snap_res.get("ok") and snap_res.get("result", {}).get("screenshot_b64"):
+                        img_bytes = base64.b64decode(snap_res["result"]["screenshot_b64"])
+                        diagnosis = self.brain.diagnose_and_recover(query=query_text, image_bytes=img_bytes, domain=domain)
+                        if diagnosis.get("has_obstacle"):
+                            obs_type = diagnosis.get("obstacle_type", "modal_popup")
+                            desc = diagnosis.get("description", "Roadblock detected")
+                            action = diagnosis.get("recommended_action", "dismiss")
+                            console.print(f"  [cyan]🧠 Qwen Vision Diagnosis:[/cyan] {obs_type} — {desc}")
+                            console.print(f"  [yellow]→[/yellow] Applying surgical recovery: [bold]{action}[/bold]...")
+                            self._apply_recovery_action(0, diagnosis)
+                            self.memory.save_recipe(domain, "obstacle_recovery", action, diagnosis)
+                            console.print(f"  [green]✓ Cached in SQLite Memory:[/green] Saved recovery recipe for {domain}")
+                except Exception as e:
+                    console.print(f"  [dim]Surgeon fallback notice: {e}[/dim]")
 
         # ── 6. LEARN ──────────────────────────────────────────────
         console.print()
@@ -299,6 +313,131 @@ Keep it direct, professional, and clear.
             "results_count": len(extracted_data),
             "elapsed_seconds": elapsed
         }
+
+    def _apply_recovery_action(self, tab_index: int, action_data: Dict[str, Any]) -> bool:
+        """
+        Execute a surgical recovery action (click coordinates, press key, click selector)
+        on a specific tab in the active Brave browser context.
+        """
+        action = action_data.get("recommended_action", "dismiss")
+        coords = action_data.get("coordinates")
+        selector = action_data.get("selector")
+        key = action_data.get("key", "Escape")
+
+        script = f"""
+        const pages = page.context().pages();
+        const targetTab = pages[{tab_index}] || page;
+        let performed = false;
+        """
+
+        if action in ["dismiss", "press_key"] or key:
+            script += f"""
+            try {{
+                await targetTab.keyboard.press({json.dumps(key or "Escape")});
+                performed = true;
+            }} catch(e) {{}}
+            """
+
+        if selector:
+            script += f"""
+            try {{
+                const el = targetTab.locator({json.dumps(selector)}).first();
+                if (await el.count() > 0) {{
+                    await el.click({{ timeout: 3000 }});
+                    performed = true;
+                }}
+            }} catch(e) {{}}
+            """
+
+        if coords and isinstance(coords, dict) and "x" in coords and "y" in coords:
+            cx = coords["x"]
+            cy = coords["y"]
+            script += f"""
+            try {{
+                await targetTab.mouse.click({cx}, {cy});
+                performed = true;
+            }} catch(e) {{}}
+            """
+
+        script += """
+        try {
+            const closeBtn = targetTab.locator("button[aria-label='Close'], button.close, .modal-close, button:has-text('✕')").first();
+            if (await closeBtn.count() > 0) {
+                await closeBtn.click({ timeout: 1500 });
+                performed = true;
+            }
+        } catch(e) {}
+        try { await targetTab.waitForTimeout(1500); } catch(e) {}
+        return { ok: true, performed: performed };
+        """
+
+        try:
+            res = self.webcmd.run_script(script, session_id=self.active_session_id, timeout=15)
+            return res.get("ok", False)
+        except Exception as e:
+            log.warning(f"Failed to apply recovery action: {e}")
+            return False
+
+    def _re_extract_tab(self, tab_index: int, store_name: str, query: str) -> List[Dict[str, Any]]:
+        """
+        Re-extract structured product records from a recovered tab in Brave Browser.
+        """
+        script = f"""
+        const pages = page.context().pages();
+        const tab = pages[{tab_index}] || page;
+        let items = [];
+
+        try {{
+            await tab.mouse.wheel(0, 600);
+            await tab.waitForTimeout(1500);
+        }} catch(e) {{}}
+
+        const url = tab.url();
+        if (url.includes("amazon")) {{
+            items = await tab.locator("div[data-component-type='s-search-result']").evaluateAll(els => els.slice(0, 3).map(el => ({{
+                store: "Amazon India",
+                tab: "Tab {tab_index + 1}",
+                title: el.querySelector("h2 span, h2")?.innerText?.trim() || "",
+                price: el.querySelector(".a-price .a-offscreen, .a-price-whole")?.innerText?.trim() || "",
+                rating: el.querySelector(".a-icon-alt")?.innerText?.trim() || "",
+                link: el.querySelector("a.a-link-normal, h2 a")?.href || ""
+            }})));
+        }} else if (url.includes("flipkart")) {{
+            items = await tab.locator("div[data-id]").evaluateAll(els => els.slice(0, 3).map(el => {{
+                const text = el.innerText || '';
+                const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
+                const priceMatch = text.match(/₹[\\d,]+/);
+                const ratingMatch = text.match(/(\\d\\.\\d)\\s*\\d*(\\s*Ratings|\\s*★)/);
+                return {{
+                    store: "Flipkart",
+                    tab: "Tab {tab_index + 1}",
+                    title: el.querySelector("img")?.alt || lines[0] || "",
+                    price: priceMatch ? priceMatch[0] : (lines.find(l => l.startsWith("₹")) || ""),
+                    rating: ratingMatch ? ratingMatch[1] + " ★" : "",
+                    link: el.querySelector("a[href*='/p/'], a")?.href || ""
+                }};
+            }}));
+        }} else {{
+            items = await tab.locator("div.snippet, div[data-type='web'], div.fdb, .result, .product-card, .vj-prod-box").evaluateAll(els => els.slice(0, 3).map(el => ({{
+                store: "{store_name}",
+                tab: "Tab {tab_index + 1}",
+                title: el.querySelector("a.h, .title, h2, h3, a, .vj-prod-name")?.innerText?.trim() || "",
+                price: "Check store for latest offer",
+                rating: "Authorized Dealer",
+                snippet: el.querySelector("p, .snippet-description, .snippet-content")?.innerText?.trim() || "",
+                link: el.querySelector("a[href^='http'], a")?.href || ""
+            }})));
+        }}
+
+        return {{ items: items.filter(it => it.title) }};
+        """
+        try:
+            res = self.webcmd.run_script(script, session_id=self.active_session_id, timeout=15)
+            if res.get("ok") and isinstance(res.get("result"), dict):
+                return res["result"].get("items", [])
+        except Exception as e:
+            log.warning(f"Re-extraction error on tab {tab_index}: {e}")
+        return []
 
     def _execute_multi_site_task(
         self,
@@ -467,12 +606,25 @@ Keep it direct, professional, and clear.
             }})));
         }} catch(e) {{}}
 
+        let tab1Screenshot = "";
+        if (tab1Items.length === 0) {{
+            try {{ tab1Screenshot = (await tab1.screenshot({{ type: "jpeg", quality: 60 }})).toString("base64"); }} catch(e) {{}}
+        }}
+        let tab2Screenshot = "";
+        if (tab2Items.length === 0) {{
+            try {{ tab2Screenshot = (await tab2.screenshot({{ type: "jpeg", quality: 60 }})).toString("base64"); }} catch(e) {{}}
+        }}
+        let tab3Screenshot = "";
+        if (tab3Items.length === 0) {{
+            try {{ tab3Screenshot = (await tab3.screenshot({{ type: "jpeg", quality: 60 }})).toString("base64"); }} catch(e) {{}}
+        }}
+
         return {{
             pagesCount: ctx.pages().length,
             tabsSummary: [
-                {{ tab: 1, name: "Amazon India", url: tab1.url(), count: tab1Items.length, items: tab1Items }},
-                {{ tab: 2, name: "Flipkart", url: tab2.url(), count: tab2Items.length, items: tab2Items }},
-                {{ tab: 3, name: "{tab3_name}", url: tab3.url(), count: tab3Items.length, items: tab3Items }}
+                {{ tab: 1, name: "Amazon India", domain: "amazon.in", url: tab1.url(), count: tab1Items.length, items: tab1Items, screenshot_b64: tab1Screenshot }},
+                {{ tab: 2, name: "Flipkart", domain: "flipkart.com", url: tab2.url(), count: tab2Items.length, items: tab2Items, screenshot_b64: tab2Screenshot }},
+                {{ tab: 3, name: "{tab3_name}", domain: "{tab3_domain}", url: tab3.url(), count: tab3Items.length, items: tab3Items, screenshot_b64: tab3Screenshot }}
             ]
         }};
         """
@@ -488,9 +640,59 @@ Keep it direct, professional, and clear.
                 console.print(f"  [green]✓[/green] Successfully opened [bold green]{pages_count} independent tabs[/bold green] in Brave Browser")
                 for t in tabs_summary:
                     t_items = [it for it in t.get("items", []) if it.get("title")]
-                    console.print(f"    • [bold yellow]Tab {t.get('tab')}[/bold yellow] ({t.get('name')}): Loaded {len(t_items)} verified product cards")
-                    for it in t_items:
-                        all_products.append(it)
+                    t_num = t.get("tab", 1)
+                    t_idx = t_num - 1
+                    t_name = t.get("name", f"Tab {t_num}")
+                    domain = t.get("domain", "")
+
+                    if t_items:
+                        console.print(f"    • [bold yellow]Tab {t_num}[/bold yellow] ({t_name}): Loaded {len(t_items)} verified product cards [green](Fast Code: PASS)[/green]")
+                        for it in t_items:
+                            all_products.append(it)
+                    else:
+                        console.print(f"    • [bold red]Tab {t_num}[/bold red] ({t_name}): [yellow]0 items extracted. Checking self-learning cache...[/yellow]")
+                        
+                        # 1. Check SQLite recipe cache first
+                        cached_recipe = self.memory.get_recipe(domain, "obstacle_recovery")
+                        if cached_recipe:
+                            console.print(f"      [bold green]⚡ Self-Learning Cache Hit ({domain}):[/bold green] Replaying learned recovery action (0s LLM latency)")
+                            self._apply_recovery_action(t_idx, cached_recipe)
+                            recovered = self._re_extract_tab(t_idx, t_name, ecom_query)
+                            if recovered:
+                                console.print(f"      [green]✓ Recovered {len(recovered)} product(s) via cached recipe![/green]")
+                                for it in recovered:
+                                    all_products.append(it)
+                                continue
+
+                        # 2. If no cached recipe, invoke On-Demand LLM Surgeon
+                        screenshot_b64 = t.get("screenshot_b64", "")
+                        if screenshot_b64:
+                            console.print(f"      [bold red]🚨 On-Demand LLM Surgeon Invoked for {domain}...[/bold red]")
+                            try:
+                                img_bytes = base64.b64decode(screenshot_b64)
+                                diagnosis = self.brain.diagnose_and_recover(query=ecom_query, image_bytes=img_bytes, domain=domain)
+                                if diagnosis.get("has_obstacle"):
+                                    obs_type = diagnosis.get("obstacle_type", "modal_popup")
+                                    desc = diagnosis.get("description", "Roadblock detected")
+                                    action = diagnosis.get("recommended_action", "dismiss")
+                                    console.print(f"      [cyan]🧠 Qwen Vision Diagnosis:[/cyan] {obs_type} — {desc}")
+                                    console.print(f"      [yellow]→[/yellow] Applying surgical recovery action: [bold]{action}[/bold]...")
+                                    self._apply_recovery_action(t_idx, diagnosis)
+                                    
+                                    # Cache in SQLite
+                                    self.memory.save_recipe(domain, "obstacle_recovery", action, diagnosis)
+                                    console.print(f"      [green]✓ Cached in SQLite Memory:[/green] Future runs on {domain} will run at pure code speed!")
+                                    
+                                    # Re-extract
+                                    recovered = self._re_extract_tab(t_idx, t_name, ecom_query)
+                                    if recovered:
+                                        console.print(f"      [green]✓ Post-Surgeon Recovery:[/green] Extracted {len(recovered)} product(s)!")
+                                        for it in recovered:
+                                            all_products.append(it)
+                                else:
+                                    console.print(f"      [dim]No blocking overlay diagnosed on {domain}.[/dim]")
+                            except Exception as ex:
+                                log.warning(f"Surgeon intervention error for {domain}: {ex}")
             else:
                 console.print(f"  [yellow]![/yellow] Multi-tab execution notice: {res.get('error')}")
         except Exception as e:
@@ -549,18 +751,18 @@ Keep it direct, professional, and clear.
 
         synthesis_prompt = f"""You are ELLA-WCD, an autonomous browser agent.
 The user asked: "{user_goal}"
-Target constraints: RTX 3050 laptop under ₹1,00,000 (1 Lakh).
-We crawled and extracted real-time product listings across 3 ecommerce platforms in Brave Browser:
+Search Target: {ecom_query}
+We crawled and extracted real-time product listings across 3 ecommerce platforms ({targets[0]['name']}, {targets[1]['name']}, {targets[2]['name']}) in Brave Browser:
 
 Extracted Products:
 {json.dumps(all_products, indent=2)}
 
 Provide a comprehensive, professional, well-formatted response containing:
-1. **Executive Verdict**: Best laptop pick within the ₹1 Lakh budget and why (value, GPU TGP/RAM, performance).
+1. **Executive Verdict**: Best pick within the user's constraints and why (value, specs, price-to-performance).
 2. **Cross-Site Comparison Table**:
-   | Store | Model Name | Key Specs (GPU/CPU/RAM) | Price | Rating | Direct Link |
-3. **Platform Insights**: Price/availability difference between Amazon, Flipkart, and Croma.
-4. **Buyer's Advice**: Important points (warranty, TGP, RAM upgradeability).
+   | Store | Model Name | Key Specs | Price | Rating | Direct Link |
+3. **Platform Insights**: Price and availability differences between {targets[0]['name']}, {targets[1]['name']}, and {targets[2]['name']}.
+4. **Buyer's Advice**: Important practical considerations before buying.
 Keep it direct, sharp, and easy to read.
 """
         final_answer = self.brain.chat(synthesis_prompt)
