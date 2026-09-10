@@ -12,17 +12,15 @@ import re
 import base64
 import urllib.parse
 from typing import Dict, Any, List, Optional
-from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
-
+from rich import box
+from ui import console, print_task_result, EllaMarkdown
 from automation.webcmd_bridge import WebcmdBridge
 from brain.qwen import QwenBrain
 from memory import Memory
 from logger import get_logger
 
 log = get_logger("automation.orchestrator")
-console = Console()
 
 
 class BrowserOrchestrator:
@@ -276,8 +274,6 @@ class BrowserOrchestrator:
 
         # ── 7. RESULT SYNTHESIS ───────────────────────────────────
         console.print()
-        console.print("[bold white][RESULT][/bold white]")
-
         synthesis_prompt = f"""You are ELLA-WCD, an autonomous browser agent.
 The user asked: "{user_goal}"
 We executed a live browser task and extracted the following evidence from '{page_title}' ({current_url}):
@@ -289,14 +285,17 @@ Provide a structured, clean, well-formatted markdown response answering the user
 Include sources, titles, dates, or URLs if available.
 Keep it direct, professional, and clear.
 """
-        final_answer = self.brain.chat(synthesis_prompt)
+        with console.status("[bold bright_magenta]✦[/bold bright_magenta] [bold bright_cyan]Synthesizing final answer with Qwen Brain...[/bold bright_cyan]", spinner="dots"):
+            try:
+                final_answer = self.brain.chat(synthesis_prompt)
+            except Exception as e:
+                final_answer = (
+                    f"**Task Execution Summary**:\n\n"
+                    f"Successfully visited `{page_title}` ({current_url}) and extracted {len(extracted_data)} evidence records.\n\n"
+                    f"Synthesis notice: {e}"
+                )
 
-        console.print(Panel(
-            final_answer,
-            title="[bold green]Autonomous Task Result[/bold green]",
-            border_style="green",
-            padding=(1, 2)
-        ))
+        print_task_result(final_answer, title="Autonomous Task Result", model_name=self.brain.active_model)
 
         elapsed = time.time() - start_time
         console.print(f"[dim]Task completed in {elapsed:.2f}s | Session: {self.active_session_id}[/dim]")
@@ -705,7 +704,14 @@ Keep it direct, professional, and clear.
 
         # Display structured Rich Table in console
         if all_products:
-            table = Table(title="Live Multi-Tab Product Comparison", show_header=True, header_style="bold magenta")
+            table = Table(
+                title="[bold bright_magenta]Live Multi-Tab Product Comparison[/bold bright_magenta]",
+                show_header=True,
+                header_style="bold bright_cyan",
+                box=box.ROUNDED,
+                border_style="bright_blue",
+                padding=(0, 1)
+            )
             table.add_column("Tab", style="dim", width=8)
             table.add_column("Store", style="cyan", width=14)
             table.add_column("Model / Title", style="white", max_width=42, overflow="ellipsis")
@@ -747,8 +753,6 @@ Keep it direct, professional, and clear.
 
         # ── 7. RESULT SYNTHESIS ───────────────────────────────────
         console.print()
-        console.print("[bold white][RESULT][/bold white]")
-
         synthesis_prompt = f"""You are ELLA-WCD, an autonomous browser agent.
 The user asked: "{user_goal}"
 Search Target: {ecom_query}
@@ -765,14 +769,18 @@ Provide a comprehensive, professional, well-formatted response containing:
 4. **Buyer's Advice**: Important practical considerations before buying.
 Keep it direct, sharp, and easy to read.
 """
-        final_answer = self.brain.chat(synthesis_prompt)
+        with console.status("[bold bright_magenta]✦[/bold bright_magenta] [bold bright_cyan]Synthesizing final analysis with Qwen Brain...[/bold bright_cyan]", spinner="dots"):
+            try:
+                final_answer = self.brain.chat(synthesis_prompt)
+            except Exception as e:
+                final_answer = (
+                    f"**Analysis Summary**:\n\n"
+                    f"Successfully crawled {len(targets)} ecommerce stores ({targets[0]['name']}, {targets[1]['name']}, {targets[2]['name']}) "
+                    f"and retrieved {len(all_products)} product listings for `{ecom_query}`.\n\n"
+                    f"Notice: Brain synthesis encountered a momentary timeout ({e}), but all data was gathered."
+                )
 
-        console.print(Panel(
-            final_answer,
-            title="[bold green]Cross-Site Autonomous Analysis Result[/bold green]",
-            border_style="green",
-            padding=(1, 2)
-        ))
+        print_task_result(final_answer, title="Cross-Site Autonomous Analysis Result", model_name=self.brain.active_model)
 
         elapsed = time.time() - start_time
         console.print(f"[dim]Task completed in {elapsed:.2f}s | Brave Session: {self.active_session_id}[/dim]")

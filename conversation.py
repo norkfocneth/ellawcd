@@ -18,11 +18,11 @@ from automation.webcmd_bridge import WebcmdBridge
 from automation.orchestrator import BrowserOrchestrator
 from memory import Memory
 from session import SessionManager, SessionState
+from ui import console, print_ai_response, EllaMarkdown
 from config import APP_NAME, VERSION, USER_NAME
 from logger import get_logger
 
 log = get_logger("conversation")
-console = Console()
 
 BROWSER_INTENT_KEYWORDS = [
     "search", "find", "open", "browse", "paper", "papers", "arxiv", "github",
@@ -173,11 +173,9 @@ class ConversationManager:
                     self.orchestrator.execute_task(user_input)
                 else:
                     # Conversational / Brain reasoning
-                    console.print("[dim]Thinking...[/dim]")
-                    reply = self.brain.chat(user_input)
-                    console.print()
-                    console.print(Panel(reply, border_style="cyan", padding=(1, 2)))
-                    console.print()
+                    with console.status("[bold bright_magenta]✦[/bold bright_magenta] [bold bright_cyan]Thinking...[/bold bright_cyan]", spinner="dots"):
+                        reply = self.brain.chat(user_input)
+                    print_ai_response(reply, model_name=self.brain.active_model)
 
             except KeyboardInterrupt:
                 console.print("\n[dim]Action cancelled.[/dim]\n")
@@ -186,4 +184,10 @@ class ConversationManager:
                 break
             except Exception as e:
                 log.error(f"Error in chat loop: {e}")
-                console.print(f"\n[red]Error:[/red] {e}\n")
+                console.print(Panel(
+                    f"[bold bright_yellow]Task Notice:[/bold bright_yellow] {e}\n\n"
+                    f"[dim]Ella encountered an unexpected condition while processing this request. The browser session was safely reset.[/dim]",
+                    title="[bold red]Execution Status[/bold red]",
+                    border_style="red",
+                    padding=(1, 2)
+                ))

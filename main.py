@@ -13,17 +13,17 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 from rich.align import Align
+from rich import box
+from ui import console
 
 from config import APP_NAME, TAGLINE, VERSION, USER_NAME, MODEL_NAME
 from logger import get_logger
 from events import event_bus, Event
 
 log = get_logger("main")
-console = Console()
 
 # ── ASCII Art Logo ─────────────────────────────
 
@@ -100,9 +100,10 @@ def boot_sequence():
     console.print()
     console.print(
         Panel(
-            f"[bold green]ELLA-WCD System Ready.[/bold green]\n"
-            f"[dim]Brain: {brain.active_model}  │  Browser: WebCMD + Brave  │  Vision: Qwen3-VL Fallback  │  Operator: {USER_NAME}[/dim]",
-            border_style="green",
+            f"[bold bright_green]✦ ELLA-WCD System Ready.[/bold bright_green]\n"
+            f"[dim]Brain: [cyan]{brain.active_model}[/cyan]  │  Browser: [cyan]WebCMD + Brave[/cyan]  │  Vision: [cyan]Qwen2.5-VL[/cyan]  │  Operator: [cyan]{USER_NAME}[/cyan][/dim]",
+            border_style="bright_green",
+            box=box.ROUNDED,
             padding=(0, 2),
         )
     )

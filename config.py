@@ -65,10 +65,12 @@ KEEP_ALIVE = -1
 
 # Generation parameters (GPU-First, Precise Agent Output)
 GENERATION_CONFIG = {
-    "temperature": 0.2,          # Low temperature for accurate tool use and planning
+    "temperature": 0.3,          # Balanced temperature for creativity + deterministic formatting
     "top_p": 0.85,
     "top_k": 30,
-    "num_predict": 512,          # Sufficient for structured responses
+    "repeat_penalty": 1.25,      # Eliminates degenerate repetitive looping in Hinglish/English
+    "repeat_last_n": 128,        # Lookback window for repetition penalty
+    "num_predict": 768,          # Adequate context length for structured multi-point answers
     "num_ctx": 8192,             # 8k context for rich page summaries
     "num_gpu": 99,               # Force layers to GPU offload
     "use_mmap": True,            # Memory mapping

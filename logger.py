@@ -24,19 +24,8 @@ def setup_logger():
     logger.remove()
     
     # ── Console Handler ────────────────────────
-    # Only WARNING and ERROR messages appear in terminal to keep chat clean.
-    # All INFO/DEBUG logs are stored silently in file logs.
-    logger.add(
-        sys.stdout,
-        format=(
-            "<green>{time:HH:mm:ss}</green> │ "
-            "<level>{level: <8}</level> │ "
-            "<cyan>{extra[module]: <20}</cyan> │ "
-            "<level>{message}</level>"
-        ),
-        level="WARNING",
-        colorize=True,
-    )
+    # Disabled for clean ChatGPT-like user terminal experience.
+    # All diagnostics, warnings, and errors are saved silently to rotating file logs.
 
     
     # ── File Handler ───────────────────────────
