@@ -84,7 +84,7 @@ def boot_sequence():
     doc = webcmd.check_doctor()
 
     if doc.get("ok"):
-        console.print(" [green]✓[/green] [dim](Cloak stealth browser ready)[/dim]")
+        console.print(" [green]✓[/green] [dim](Brave Browser connected)[/dim]")
     else:
         console.print(f" [yellow]![/yellow] [dim]({doc.get('error', 'Status OK')})[/dim]")
 
@@ -101,7 +101,7 @@ def boot_sequence():
     console.print(
         Panel(
             f"[bold green]ELLA-WCD System Ready.[/bold green]\n"
-            f"[dim]Brain: {brain.active_model}  │  Browser: WebCMD Cloak  │  Vision: Qwen3-VL Fallback  │  Operator: {USER_NAME}[/dim]",
+            f"[dim]Brain: {brain.active_model}  │  Browser: WebCMD + Brave  │  Vision: Qwen3-VL Fallback  │  Operator: {USER_NAME}[/dim]",
             border_style="green",
             padding=(0, 2),
         )

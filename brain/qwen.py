@@ -137,16 +137,25 @@ class QwenBrain:
     def plan_workflow(self, task_goal: str) -> Dict[str, Any]:
         """
         Decompose a user request into a structured browser workflow.
-        Returns a parsed JSON workflow plan.
+        Returns a parsed JSON workflow plan with multi-site awareness.
         """
         planner_prompt = f"""You are the Planning Engine of ELLA-WCD, an autonomous browser agent.
 Decompose the following user task into a structured, step-by-step browser plan.
+If the user asks to search or compare across multiple websites (e.g. 3 ecommerce sites like Amazon, Flipkart, Croma, etc.), set is_multi_site to true and list each site with its target URL and search query.
 
 User Task: "{task_goal}"
 
 Respond ONLY with a valid JSON object matching this schema:
 {{
   "understanding": "1 sentence summarizing the goal",
+  "is_multi_site": true/false,
+  "sites": [
+    {{
+      "name": "Site name (e.g. Amazon, Flipkart, Croma)",
+      "url": "https://...",
+      "query": "search query"
+    }}
+  ],
   "starting_url": "https://...",
   "steps": [
     {{
@@ -157,8 +166,8 @@ Respond ONLY with a valid JSON object matching this schema:
       "value": "Optional text to search or type"
     }}
   ],
-  "verification_criteria": "How to verify success (e.g. 5 non-empty results extracted)",
-  "learned_pattern_name": "Short identifier for site memory, e.g. 'arxiv_paper_search'"
+  "verification_criteria": "How to verify success (e.g. valid products extracted from each site)",
+  "learned_pattern_name": "Short identifier for site memory, e.g. 'ecommerce_laptop_comparison'"
 }}
 
 Do NOT include any markdown formatting around the JSON if possible, just the raw JSON object.
@@ -180,24 +189,48 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
                 content = res.json().get("message", {}).get("content", "").strip()
                 if "```" in content:
                     content = content.split("```json")[-1].split("```")[0].strip()
-                return json.loads(content)
+                parsed = json.loads(content)
+                # Check if multi-site intent is present in task goal even if LLM missed the boolean
+                lower_goal = task_goal.lower()
+                if any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "amazon and flipkart", "amazon, flipkart"]):
+                    parsed["is_multi_site"] = True
+                    if not parsed.get("sites"):
+                        parsed["sites"] = [
+                            {"name": "Amazon", "url": "https://www.amazon.in", "query": task_goal},
+                            {"name": "Flipkart", "url": "https://www.flipkart.com", "query": task_goal},
+                            {"name": "Croma", "url": "https://www.croma.com", "query": task_goal}
+                        ]
+                return parsed
         except Exception as e:
             log.warning(f"Workflow planner JSON parsing failed: {e}")
 
         # Rule-based fallback plan if LLM parsing fails
+        lower_goal = task_goal.lower()
+        is_multi = any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "ecommerce"])
         clean_val = task_goal
-        for prefix in ["open 3 ecommerce website and search for ", "open 3 websites and search for ", "search for ", "find "]:
+        for prefix in ["open 3 ecommerce website and search for ", "open 3 websites and search for ", "find best ", "search for ", "find "]:
             if clean_val.lower().startswith(prefix):
                 clean_val = clean_val[len(prefix):]
+
+        sites = []
+        if is_multi:
+            sites = [
+                {"name": "Amazon", "url": "https://www.amazon.in", "query": clean_val.strip()},
+                {"name": "Flipkart", "url": "https://www.flipkart.com", "query": clean_val.strip()},
+                {"name": "Croma", "url": "https://www.croma.com", "query": clean_val.strip()}
+            ]
+
         return {
             "understanding": task_goal,
-            "starting_url": "https://duckduckgo.com",
+            "is_multi_site": is_multi,
+            "sites": sites,
+            "starting_url": "https://www.amazon.in" if is_multi else "https://search.brave.com",
             "steps": [
-                {"step_id": 1, "action": "search", "description": "Search for query", "target": "input[name='q']", "value": clean_val.strip()},
-                {"step_id": 2, "action": "extract", "description": "Extract top results", "target": "article, .result", "value": ""}
+                {"step_id": 1, "action": "search", "description": "Search for query across sites", "target": "input", "value": clean_val.strip()},
+                {"step_id": 2, "action": "extract", "description": "Extract top results", "target": "product card", "value": ""}
             ],
-            "verification_criteria": "Extract at least 3 relevant items",
-            "learned_pattern_name": "web_search_flow"
+            "verification_criteria": "Extract at least 3 relevant items from target sites",
+            "learned_pattern_name": "ecommerce_multi_search" if is_multi else "web_search_flow"
         }
 
     def vision_localize(self, query: str, image_bytes: bytes) -> Dict[str, Any]:

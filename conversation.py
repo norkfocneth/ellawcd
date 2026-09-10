@@ -27,8 +27,9 @@ console = Console()
 BROWSER_INTENT_KEYWORDS = [
     "search", "find", "open", "browse", "paper", "papers", "arxiv", "github",
     "extract", "compare", "lookup", "website", "url", "http", "www", "article",
-    "summary", "price", "documentation", "scrape", "google", "duckduckgo",
-    "dhoondo", "khojo", "dekho", "kholo", "batao"
+    "summary", "price", "documentation", "scrape", "google", "brave", "bravesearch",
+    "laptop", "laptops", "amazon", "flipkart", "croma", "ecommerce", "buy", "store",
+    "deal", "deals", "dhoondo", "khojo", "dekho", "kholo", "batao"
 ]
 
 

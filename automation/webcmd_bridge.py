@@ -17,6 +17,12 @@ from logger import get_logger
 
 log = get_logger("automation.webcmd")
 
+# Ensure Brave Browser executable is explicitly configured for Cloak/WebCMD
+BRAVE_DEFAULT_PATH = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+if os.path.exists(BRAVE_DEFAULT_PATH):
+    os.environ["CLOAKBROWSER_BINARY_PATH"] = BRAVE_DEFAULT_PATH
+    os.environ["WEBCMD_BROWSER_EXECUTABLE_PATH"] = BRAVE_DEFAULT_PATH
+
 
 class WebcmdBridge:
     """
@@ -77,7 +83,10 @@ class WebcmdBridge:
                         pass
 
             if res.returncode != 0:
-                log.warning(f"WebCMD command failed (code {res.returncode}): {stderr or stdout}")
+                if "Candidate capture requires a valid product manifest" in (stderr or stdout):
+                    log.debug(f"WebCMD candidate capture note: {stderr or stdout}")
+                else:
+                    log.debug(f"WebCMD command info (code {res.returncode}): {stderr or stdout}")
                 return {"ok": False, "error": stderr or stdout, "code": res.returncode}
 
             return {"ok": True, "output": stdout}
