@@ -142,7 +142,8 @@ class QwenBrain:
         planner_prompt = f"""You are the Planning Engine of ELLA-WCD, an autonomous browser agent.
 Decompose the following user task into a structured, step-by-step browser plan.
 - If the user asks to search or compare across multiple ecommerce sites (Amazon, Flipkart, Croma), set is_multi_site to true and category to "ecommerce".
-- If the user asks to search, find, or compare across quick commerce / 10-minute grocery brands (e.g. Blinkit/Zomato, Zepto, Swiggy Instamart, Amazon Fresh, Flipkart Minutes) or find cheapest vegetables/groceries like tomatoes, set is_multi_site to true, category to "quick_commerce", and configure the 3 target quick commerce sites (Blinkit, Zepto, Swiggy Instamart/Amazon Fresh).
+- If the user asks to search, find, or compare across quick commerce / 10-minute grocery brands (e.g. Blinkit/Zomato, Zepto, Swiggy Instamart, Amazon Fresh, Flipkart Minutes) or find cheapest vegetables/groceries like tomatoes, set is_multi_site to true, category to "quick_commerce", and configure the 3 target quick commerce sites (Blinkit, Zepto, Amazon Fresh).
+- If the user asks to search, find, or compare clothing, apparel, fashion items or clothes (e.g. hoodie, t-shirt, shirt, jeans, jacket, shoes, dress, saree, kurta, kapde, samaan), set is_multi_site to true, category to "clothing", and configure the 3 target fashion platforms: Flipkart, Amazon, and Myntra.
 
 User Task: "{task_goal}"
 
@@ -150,7 +151,7 @@ Respond ONLY with a valid JSON object matching this schema:
 {{
   "understanding": "1 sentence summarizing the goal",
   "is_multi_site": true/false,
-  "category": "quick_commerce | ecommerce | research | general",
+  "category": "clothing | quick_commerce | ecommerce | research | general",
   "sites": [
     {{
       "name": "Site name (e.g. Blinkit, Zepto, Swiggy Instamart or Amazon)",
@@ -212,6 +213,23 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
                             t3
                         ]
 
+                # Check Clothing & Fashion intent
+                clothing_kws = [
+                    "clothing", "clothes", "fashion", "apparel", "kapde", "kapda", "samaan",
+                    "tshirt", "t-shirt", "shirt", "shirts", "jeans", "hoodie", "hoodies", "jacket", "jackets",
+                    "sweatshirt", "sweatshirts", "kurta", "kurti", "saree", "dress", "dresses",
+                    "shoes", "sneakers", "myntra", "zara", "h&m", "trousers", "pants", "trackpants"
+                ]
+                if any(k in lower_goal for k in clothing_kws) or parsed.get("category") == "clothing":
+                    parsed["is_multi_site"] = True
+                    parsed["category"] = "clothing"
+                    if not parsed.get("sites") or len(parsed.get("sites", [])) < 3:
+                        parsed["sites"] = [
+                            {"name": "Flipkart", "url": "https://www.flipkart.com", "query": task_goal},
+                            {"name": "Amazon", "url": "https://www.amazon.in", "query": task_goal},
+                            {"name": "Myntra", "url": "https://www.myntra.com", "query": task_goal}
+                        ]
+
                 # Check standard multi-site intent
                 elif any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "amazon and flipkart", "amazon, flipkart"]):
                     parsed["is_multi_site"] = True
@@ -227,6 +245,14 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
 
         # Rule-based fallback plan if LLM parsing fails
         lower_goal = task_goal.lower()
+        clothing_kws = [
+            "clothing", "clothes", "fashion", "apparel", "kapde", "kapda", "samaan",
+            "tshirt", "t-shirt", "shirt", "shirts", "jeans", "hoodie", "hoodies", "jacket", "jackets",
+            "sweatshirt", "sweatshirts", "kurta", "kurti", "saree", "dress", "dresses",
+            "shoes", "sneakers", "myntra", "zara", "h&m", "trousers", "pants", "trackpants"
+        ]
+        is_clothing = any(k in lower_goal for k in clothing_kws)
+
         qcom_kws = [
             "quick commerce", "q-commerce", "quick eccoece", "quick ecommerce",
             "blinkit", "zepto", "instamart", "swiggy", "zomato", "amazon fresh",
@@ -234,7 +260,7 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
             "tomato", "tomatoes", "onion", "vegetable", "vegetables", "grocery", "groceries", "milk", "sasta"
         ]
         is_qcom = any(k in lower_goal for k in qcom_kws)
-        is_multi = is_qcom or any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "ecommerce"])
+        is_multi = is_clothing or is_qcom or any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "ecommerce"])
         
         clean_val = task_goal
         for prefix in [
@@ -245,7 +271,18 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
                 clean_val = clean_val[len(prefix):]
 
         sites = []
-        if is_qcom:
+        category = "general"
+        if is_clothing:
+            category = "clothing"
+            sites = [
+                {"name": "Flipkart", "url": "https://www.flipkart.com", "query": clean_val.strip()},
+                {"name": "Amazon", "url": "https://www.amazon.in", "query": clean_val.strip()},
+                {"name": "Myntra", "url": "https://www.myntra.com", "query": clean_val.strip()}
+            ]
+            pattern_name = "clothing_fashion_comparison"
+            start_url = "https://www.flipkart.com"
+        elif is_qcom:
+            category = "quick_commerce"
             t3 = {"name": "Swiggy Instamart", "url": "https://www.swiggy.com/instamart", "query": clean_val.strip()} if ("swiggy" in lower_goal or "instamart" in lower_goal) else {"name": "Amazon Fresh", "url": "https://www.amazon.in", "query": clean_val.strip()}
             sites = [
                 {"name": "Blinkit", "url": "https://blinkit.com", "query": clean_val.strip()},
@@ -253,22 +290,26 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
                 t3
             ]
             pattern_name = "qcommerce_grocery_comparison"
+            start_url = "https://blinkit.com"
         elif is_multi:
+            category = "ecommerce"
             sites = [
                 {"name": "Amazon", "url": "https://www.amazon.in", "query": clean_val.strip()},
                 {"name": "Flipkart", "url": "https://www.flipkart.com", "query": clean_val.strip()},
                 {"name": "Croma", "url": "https://www.croma.com", "query": clean_val.strip()}
             ]
             pattern_name = "ecommerce_multi_search"
+            start_url = "https://www.amazon.in"
         else:
             pattern_name = "web_search_flow"
+            start_url = "https://www.google.com"
 
         return {
             "understanding": task_goal,
             "is_multi_site": is_multi,
-            "category": "quick_commerce" if is_qcom else ("ecommerce" if is_multi else "general"),
+            "category": category,
             "sites": sites,
-            "starting_url": "https://blinkit.com" if is_qcom else ("https://www.amazon.in" if is_multi else "https://www.google.com"),
+            "starting_url": start_url,
             "steps": [
                 {"step_id": 1, "action": "search", "description": "Search for query across target platforms", "target": "input", "value": clean_val.strip()},
                 {"step_id": 2, "action": "extract", "description": "Extract product cards, prices, and pack weights", "target": "product card", "value": ""}

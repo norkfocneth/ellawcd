@@ -36,7 +36,12 @@ BROWSER_INTENT_KEYWORDS = [
     "quick commerce", "q-commerce", "quick eccoece", "quick ecommerce", "grocery", "groceries",
     "tomato", "tomatoes", "onion", "potato", "vegetable", "vegetables", "milk", "fruits", "fruit",
     "blinkit", "zepto", "instamart", "swiggy", "zomato", "amazon fresh", "bigbasket", "bbnow",
-    "flipkart quick", "flipkart minutes", "cheapest", "sasta", "saste"
+    "flipkart quick", "flipkart minutes", "cheapest", "sasta", "saste",
+    # Clothing, Fashion & Apparel Intent
+    "clothing", "clothes", "fashion", "apparel", "kapde", "kapda", "samaan",
+    "tshirt", "t-shirt", "shirt", "shirts", "jeans", "hoodie", "hoodies", "jacket", "jackets",
+    "sweatshirt", "sweatshirts", "kurta", "kurti", "saree", "dress", "dresses",
+    "shoes", "sneakers", "myntra", "zara", "h&m", "trousers", "pants", "trackpants"
 ]
 
 
