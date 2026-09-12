@@ -129,6 +129,25 @@ class Memory:
                 UNIQUE(domain, task_pattern, action_type)
             )
         """)
+
+        # ── Search Cache Table (Offline Intelligence) ───
+        # Caches full search snapshots for offline lookup when internet is disconnected
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS search_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query TEXT NOT NULL,
+                normalized_key TEXT NOT NULL,
+                category TEXT NOT NULL,
+                items_json TEXT NOT NULL,
+                winner_json TEXT NOT NULL,
+                final_answer TEXT NOT NULL,
+                source TEXT DEFAULT 'live_crawl',
+                hit_count INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(normalized_key, category)
+            )
+        """)
         
         self.conn.commit()
 
@@ -457,6 +476,139 @@ class Memory:
                 "updated_at": row["updated_at"]
             })
         return results
+
+    # ═══════════════════════════════════════════
+    # OFFLINE SEARCH CACHE ENGINE
+    # ═══════════════════════════════════════════
+
+    def save_search_cache(
+        self,
+        query: str,
+        category: str,
+        items: List[Dict[str, Any]],
+        winner: Dict[str, Any],
+        final_answer: str,
+        source: str = "live_crawl"
+    ) -> int:
+        """
+        Cache a complete search snapshot into SQLite for offline recall.
+        """
+        import re
+        norm_key = re.sub(r'[^a-zA-Z0-9]+', ' ', query).strip().lower()
+        now = datetime.now().isoformat()
+        items_str = json.dumps(items)
+        winner_str = json.dumps(winner)
+        cursor = self.conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO search_cache (
+                query, normalized_key, category, items_json, winner_json, final_answer,
+                source, hit_count, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(normalized_key, category) DO UPDATE SET
+                items_json = excluded.items_json,
+                winner_json = excluded.winner_json,
+                final_answer = excluded.final_answer,
+                hit_count = search_cache.hit_count + 1,
+                updated_at = excluded.updated_at
+        """, (query, norm_key, category, items_str, winner_str, final_answer, source, now, now))
+
+        self.conn.commit()
+        log.info(f"Offline search cache saved for '{query}' (key='{norm_key}', cat='{category}')")
+        return cursor.lastrowid or 1
+
+    def get_search_cache(self, query: str, category: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve an exact or normalized search snapshot.
+        """
+        import re
+        norm_key = re.sub(r'[^a-zA-Z0-9]+', ' ', query).strip().lower()
+        cursor = self.conn.cursor()
+
+        if category:
+            cursor.execute("""
+                SELECT * FROM search_cache
+                WHERE normalized_key = ? AND category = ?
+                ORDER BY updated_at DESC LIMIT 1
+            """, (norm_key, category))
+        else:
+            cursor.execute("""
+                SELECT * FROM search_cache
+                WHERE normalized_key = ?
+                ORDER BY updated_at DESC LIMIT 1
+            """, (norm_key,))
+
+        row = cursor.fetchone()
+        if row:
+            return self._parse_cache_row(row)
+        return None
+
+    def find_matching_cache(self, user_goal: str, category: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Find the best matching offline snapshot from SQLite local database.
+        Checks exact match, substring inclusion, and primary keywords.
+        """
+        import re
+        clean_goal = re.sub(r'[^a-zA-Z0-9]+', ' ', user_goal).strip().lower()
+
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM search_cache ORDER BY updated_at DESC")
+        rows = cursor.fetchall()
+
+        # 1. Exact match on normalized key
+        for r in rows:
+            key = r["normalized_key"]
+            if key == clean_goal:
+                return self._parse_cache_row(r)
+
+        # 2. Key contains or is contained in user goal
+        for r in rows:
+            key = r["normalized_key"]
+            if key in clean_goal or clean_goal in key:
+                return self._parse_cache_row(r)
+
+        # 3. Core keyword match (e.g. tomato, onion, hoodie, shoes, shirt, jeans, laptop)
+        goal_words = set(clean_goal.split())
+        for r in rows:
+            key_words = set(r["normalized_key"].split())
+            intersection = goal_words.intersection(key_words)
+            meaningful_intersection = [w for w in intersection if len(w) > 3 and w not in ["best", "find", "search", "online", "price", "sasta", "compare"]]
+            if meaningful_intersection:
+                return self._parse_cache_row(r)
+
+        return None
+
+    def get_all_cached_queries(self) -> List[Dict[str, Any]]:
+        """Get all cached queries stored in SQLite search_cache."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, query, category, updated_at, hit_count FROM search_cache ORDER BY updated_at DESC")
+        return [dict(r) for r in cursor.fetchall()]
+
+    def _parse_cache_row(self, row) -> Dict[str, Any]:
+        """Helper to parse a search_cache SQLite row into Python objects."""
+        try:
+            items = json.loads(row["items_json"])
+        except Exception:
+            items = []
+        try:
+            winner = json.loads(row["winner_json"])
+        except Exception:
+            winner = {}
+
+        return {
+            "id": row["id"],
+            "query": row["query"],
+            "normalized_key": row["normalized_key"],
+            "category": row["category"],
+            "items": items,
+            "winner": winner,
+            "final_answer": row["final_answer"],
+            "source": row["source"],
+            "hit_count": row["hit_count"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"]
+        }
 
     def close(self):
         """Close database connection."""

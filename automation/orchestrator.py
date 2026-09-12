@@ -4,16 +4,20 @@
 # With Multi-Site Autonomous Exploration in Brave Browser
 # ──────────────────────────────────────────────
 
+import os
 import json
 import time
 import uuid
 import io
 import re
+import socket
 import base64
 import urllib.parse
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from rich.table import Table
 from rich import box
+from rich.panel import Panel
 from ui import console, print_task_result, EllaMarkdown
 from automation.webcmd_bridge import WebcmdBridge
 from brain.qwen import QwenBrain
@@ -23,11 +27,30 @@ from logger import get_logger
 log = get_logger("automation.orchestrator")
 
 
+def is_internet_available(host: str = "8.8.8.8", port: int = 53, timeout: float = 1.2) -> bool:
+    """Probe network to determine if active internet is reachable."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.close()
+        return True
+    except Exception:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            s.connect(("1.1.1.1", port))
+            s.close()
+            return True
+        except Exception:
+            return False
+
+
 class BrowserOrchestrator:
     """
     Core engine of ELLA-WCD. Orchestrates the complete self-learning
     browser loop from user prompt to final verified answer across single
-    and multiple websites using Brave Browser.
+    and multiple websites using Google Chrome, with offline memory support.
     """
 
     def __init__(self, brain: QwenBrain, webcmd: Optional[WebcmdBridge] = None):
@@ -35,6 +58,7 @@ class BrowserOrchestrator:
         self.webcmd = webcmd or WebcmdBridge()
         self.memory = Memory()
         self.active_session_id: Optional[str] = None
+        self.force_offline: bool = False
 
     def _ensure_active_session(self, prefix: str = "ella") -> str:
         """
@@ -64,6 +88,13 @@ class BrowserOrchestrator:
         start_time = time.time()
         console.print()
 
+        # Check internet connectivity or forced offline mode BEFORE expensive LLM planning
+        lower_goal = user_goal.lower()
+        offline_keywords = ["offline", "bina internet", "no internet", "internet off", "without internet"]
+        forced_offline = self.force_offline or (os.environ.get("ELLA_OFFLINE") == "1") or any(k in lower_goal for k in offline_keywords)
+        if forced_offline or not is_internet_available():
+            return self._execute_offline_mode(user_goal, start_time)
+
         # ── 1. PLAN ───────────────────────────────────────────────
         console.print("[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]")
         console.print(f"[bold cyan][PLAN][/bold cyan] Analyzing task: [italic]{user_goal}[/italic]")
@@ -71,7 +102,6 @@ class BrowserOrchestrator:
         plan = self.brain.plan_workflow(user_goal)
         understanding = plan.get("understanding", user_goal)
         is_multi_site = plan.get("is_multi_site", False)
-        lower_goal = user_goal.lower()
 
         # Check if download or browser extension installation is requested
         download_keywords = [
@@ -1400,6 +1430,18 @@ Keep it direct, sharp, and easy to read.
                     f"**Cheapest Option**: **{cheapest_winner['store']}** offers `{cheapest_winner['title']}` at **{cheapest_winner['price']}** ({cheapest_winner['rate_per_kg']}) with {cheapest_winner['eta']} delivery!\n\n"
                     f"Notice: Brain synthesis notice ({e}), but all data was gathered."
                 )
+        # Cache snapshot in local SQLite database for offline availability
+        try:
+            self.memory.save_search_cache(
+                query=item_query,
+                category="quick_commerce",
+                items=parsed_products,
+                winner=cheapest_winner,
+                final_answer=final_answer
+            )
+            console.print(f"  [green]✓[/green] [dim]Cached search snapshot in SQLite (data/memory.db) for offline availability[/dim]")
+        except Exception as e:
+            log.debug(f"Search cache note: {e}")
 
         print_task_result(final_answer, title="Quick Commerce Analysis Result (Google Chrome)", model_name=self.brain.active_model)
 
@@ -1837,6 +1879,19 @@ Keep it sharp, helpful, and pleasant.
                     f"Notice: Brain synthesis notice ({e}), but all data was gathered."
                 )
 
+        # Cache snapshot in local SQLite database for offline availability
+        try:
+            self.memory.save_search_cache(
+                query=clean_item,
+                category="clothing",
+                items=parsed_clothing,
+                winner=cheapest_winner,
+                final_answer=final_answer
+            )
+            console.print(f"  [green]✓[/green] [dim]Cached fashion search snapshot in SQLite (data/memory.db) for offline availability[/dim]")
+        except Exception as e:
+            log.debug(f"Search cache note: {e}")
+
         print_task_result(final_answer, title="Clothing & Fashion Analysis Result (Google Chrome)", model_name=self.brain.active_model)
 
         elapsed = time.time() - start_time
@@ -1853,6 +1908,191 @@ Keep it sharp, helpful, and pleasant.
             "results_count": len(parsed_clothing),
             "elapsed_seconds": elapsed
         }
+
+    def _execute_offline_mode(self, user_goal: str, start_time: float) -> Dict[str, Any]:
+        """
+        Autonomous Offline Intelligence Engine.
+        When internet is disconnected or offline mode is requested,
+        ELLA fetches previously crawled data, price tables, winner recommendations,
+        and knowledge directly from the local SQLite database (data/memory.db).
+        """
+        console.print("[bold bright_yellow]═══════════════════════════════════════════════════════════[/bold bright_yellow]")
+        console.print("[bold bright_yellow]⚡ OFFLINE INTELLIGENCE ENGINE (Local Database Retrieval)[/bold bright_yellow]")
+        console.print(f"[dim]Network Status: [bold red]Offline / Local Mode[/bold red] | User Query: [italic]{user_goal}[/italic][/dim]")
+        console.print("[bold bright_yellow]───────────────────────────────────────────────────────────[/bold bright_yellow]")
+
+        # Extract clean query target from user goal
+        clean_target = user_goal.strip()
+        for prefix in [
+            "offline ", "bina internet ", "without internet ", "no internet ",
+            "search for ", "search ", "find ", "compare ", "tell me about ",
+            "price of ", "rate of ", "buy ", "sasta ", "best ", "kapde ", "clothes "
+        ]:
+            if clean_target.lower().startswith(prefix):
+                clean_target = clean_target[len(prefix):].strip()
+                break
+        clean_target = clean_target.strip("?.!")
+
+        with console.status("[bold bright_magenta]✦[/bold bright_magenta] [bold bright_cyan]Querying local SQLite database (data/memory.db)...[/bold bright_cyan]", spinner="dots"):
+            cached_data = self.memory.find_matching_cache(clean_target)
+
+        if not cached_data:
+            # Fallback: check with entire user_goal as well
+            cached_data = self.memory.find_matching_cache(user_goal)
+
+        if cached_data:
+            time_str = cached_data.get("updated_at") or cached_data.get("created_at") or "Unknown"
+            # Format time nicely
+            try:
+                dt = datetime.fromisoformat(time_str)
+                formatted_time = dt.strftime("%d %b %Y, %I:%M %p")
+            except Exception:
+                formatted_time = time_str
+
+            query_item = cached_data.get("query", clean_target)
+            category = cached_data.get("category", "general")
+            items = cached_data.get("items", [])
+            winner = cached_data.get("winner", {})
+            hit_count = cached_data.get("hit_count", 1)
+
+            console.print()
+            console.print(Panel(
+                f"[bold bright_cyan]📦 LOCAL DATABASE SNAPSHOT RETRIEVED[/bold bright_cyan]\n"
+                f"[bold white]Pichhli baar last search ({formatted_time}) ke hisaab se hamare local database (`data/memory.db`) me yeh details saved hain:[/bold white]\n\n"
+                f"• Query Key: [bold yellow]{query_item}[/bold yellow] | Category: [bold green]{category}[/bold green]\n"
+                f"• Database Location: [dim]SQLite (data/memory.db | Hit #{hit_count})[/dim]\n"
+                f"• Internet Connection: [bold bright_green]NOT REQUIRED (100% Offline Retrieval)[/bold bright_green]",
+                title="[bold bright_yellow]⚡ Offline Mode Active[/bold bright_yellow]",
+                border_style="bright_yellow",
+                padding=(1, 2)
+            ))
+
+            # Render structured table if items exist
+            if items:
+                table = Table(title=f"Offline Cached Comparison for '{query_item.title()}' (Last saved: {formatted_time})", box=box.ROUNDED)
+                if category == "clothing":
+                    table.add_column("Store / Platform", style="bold cyan", no_wrap=True)
+                    table.add_column("Brand", style="yellow")
+                    table.add_column("Product Title", style="white")
+                    table.add_column("Saved Live Price", style="bold green")
+                    table.add_column("Discount", style="bright_magenta")
+                    table.add_column("Rating", style="bold bright_yellow")
+                    table.add_column("Saved Product URL", style="dim blue")
+
+                    for it in items:
+                        table.add_row(
+                            str(it.get("store", "Store")),
+                            str(it.get("brand", "")),
+                            str(it.get("title", "")),
+                            str(it.get("price", "")),
+                            str(it.get("discount", "")),
+                            str(it.get("rating", "")),
+                            str(it.get("link", ""))
+                        )
+                else:
+                    # Quick commerce table
+                    table.add_column("Store / Platform", style="bold cyan", no_wrap=True)
+                    table.add_column("Product Title", style="white")
+                    table.add_column("Pack / Weight", style="dim")
+                    table.add_column("Saved Live Price", style="bold green")
+                    table.add_column("Rate / Unit", style="yellow")
+                    table.add_column("Standard Delivery ETA", style="magenta")
+                    table.add_column("Saved Product URL", style="dim blue")
+
+                    for it in items:
+                        table.add_row(
+                            str(it.get("store", "Store")),
+                            str(it.get("title", "")),
+                            str(it.get("weight", "Standard")),
+                            str(it.get("price", "")),
+                            str(it.get("rate_per_kg", "")),
+                            str(it.get("eta", "")),
+                            str(it.get("link", ""))
+                        )
+
+                console.print()
+                console.print(table)
+                console.print()
+
+            # Render Winner Card if exists
+            if winner:
+                store_w = winner.get("store", "Best Store")
+                price_w = winner.get("price", "")
+                title_w = winner.get("title", query_item)
+                brand_w = winner.get("brand", "")
+                rate_w = winner.get("rate_per_kg", "")
+
+                label = f"{brand_w} - {title_w}" if brand_w else title_w
+                rate_info = f" ({rate_w})" if rate_w else ""
+                console.print(Panel(
+                    f"[bold bright_green]🏆 BEST DEAL (FROM LOCAL DATABASE CACHE)[/bold bright_green]\n\n"
+                    f"• Platform: [bold yellow]{store_w}[/bold yellow]\n"
+                    f"• Item: [bold white]{label}[/bold white]\n"
+                    f"• Saved Price: [bold bright_green]{price_w}[/bold bright_green]{rate_info}\n"
+                    f"• Verification: [dim]Saved in SQLite from previous Chrome crawler run[/dim]",
+                    title="[bold green]Offline Winner Recommendation[/bold green]",
+                    border_style="green",
+                    padding=(1, 2)
+                ))
+
+            # Display final synthesized answer stored in database
+            final_answer = cached_data.get("final_answer", "")
+            offline_header = (
+                f"> [!NOTE]\n"
+                f"> **Offline Mode Active**: Internet band ya unreachable hone par local database use kiya gaya hai.\n"
+                f"> **Pichhli baar last search ({formatted_time}) ke hisaab se hamare local database (`data/memory.db`) me yeh details saved hain:**\n\n"
+            )
+            full_display = offline_header + final_answer
+
+            print_task_result(full_display, title="Offline Memory Result (data/memory.db)", model_name="Local SQLite Database")
+
+            elapsed = time.time() - start_time
+            console.print(f"[dim]Offline data served in {elapsed:.3f}s from data/memory.db | Zero network latency[/dim]")
+            console.print("[bold bright_yellow]═══════════════════════════════════════════════════════════[/bold bright_yellow]")
+
+            return {
+                "ok": True,
+                "offline": True,
+                "goal": user_goal,
+                "answer": full_display,
+                "results_count": len(items),
+                "last_search_time": formatted_time,
+                "elapsed_seconds": elapsed
+            }
+        else:
+            # Query not found in local cache
+            all_cached = self.memory.get_all_cached_queries()
+            cached_names = [f"'{c['query']}' ({c['category']})" for c in all_cached]
+            cached_list_str = ", ".join(cached_names) if cached_names else "Koi previous search saved nahi hai abhi tak"
+
+            err_msg = (
+                f"**Offline Mode Notice**:\n\n"
+                f"Aapka internet connection band ya unreachable hai, aur `{clean_target}` hamare local database (`data/memory.db`) me abhi tak search/cache nahi hua hai.\n\n"
+                f"**Hamare Local Database me currently available searches**:\n"
+                f"{cached_list_str}\n\n"
+                f"Aap inme se koi bhi item offline query kar sakte hain jaise: `tomatoes`, `shoes`, `black hoodie`, etc.\n"
+                f"Naye items internet connect hone par automatically local database me save ho jayenge."
+            )
+
+            console.print()
+            console.print(Panel(
+                f"[bold bright_red]⚠️ ITEM NOT CACHED IN LOCAL DATABASE[/bold bright_red]\n\n"
+                f"Internet off hai aur `{clean_target}` pehle search nahi kiya gaya tha.\n\n"
+                f"[bold white]Available Offline Searches in data/memory.db:[/bold white]\n"
+                f"[bold yellow]{cached_list_str}[/bold yellow]",
+                title="[bold red]Offline Cache Miss[/bold red]",
+                border_style="red",
+                padding=(1, 2)
+            ))
+
+            print_task_result(err_msg, title="Offline Notice (Local SQLite Memory)", model_name="Local SQLite Database")
+            return {
+                "ok": False,
+                "offline": True,
+                "goal": user_goal,
+                "answer": err_msg,
+                "elapsed_seconds": time.time() - start_time
+            }
 
     def _execute_download_or_extension_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
         """

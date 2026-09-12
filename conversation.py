@@ -41,7 +41,9 @@ BROWSER_INTENT_KEYWORDS = [
     "clothing", "clothes", "fashion", "apparel", "kapde", "kapda", "samaan",
     "tshirt", "t-shirt", "shirt", "shirts", "jeans", "hoodie", "hoodies", "jacket", "jackets",
     "sweatshirt", "sweatshirts", "kurta", "kurti", "saree", "dress", "dresses",
-    "shoes", "sneakers", "myntra", "zara", "h&m", "trousers", "pants", "trackpants"
+    "shoes", "sneakers", "myntra", "zara", "h&m", "trousers", "pants", "trackpants",
+    # Offline Intelligence & SQLite Memory Intent
+    "offline", "bina internet", "no internet", "without internet", "cache", "cached", "database", "saved search"
 ]
 
 
@@ -131,6 +133,37 @@ class ConversationManager:
                 console.print(f"  • [bold yellow]{r['domain']}[/bold yellow] ({r['task_pattern']}): action=[green]{r['action_type']}[/green], hits=[green]{r['success_count']}x[/green]")
             return True
 
+        elif root in ["/offline", "/cache"]:
+            if len(parts) > 1:
+                target = " ".join(parts[1:])
+                if target.lower() in ["on", "enable", "true", "1"]:
+                    self.orchestrator.force_offline = True
+                    console.print("[yellow]Offline Mode: FORCED ON (All queries will serve from SQLite local database)[/yellow]")
+                    return True
+                elif target.lower() in ["off", "disable", "false", "0"]:
+                    self.orchestrator.force_offline = False
+                    console.print("[green]Offline Mode: OFF (Live Google Chrome exploration enabled)[/green]")
+                    return True
+                else:
+                    self.orchestrator._execute_offline_mode(target, time.time())
+                    return True
+            else:
+                cached = self.memory.get_all_cached_queries()
+                searches_list = "\n".join([f"  • [yellow]{c['query']}[/yellow] ([cyan]{c['category']}[/cyan]) — [dim]{c['updated_at']}[/dim]" for c in cached]) if cached else "  [dim]None yet[/dim]"
+                console.print(Panel(
+                    f"[bold bright_yellow]⚡ OFFLINE LOCAL CACHE STATUS[/bold bright_yellow]\n\n"
+                    f"• Database File: [cyan]{self.memory.db_path}[/cyan]\n"
+                    f"• Total Cached Search Snapshots: [bold green]{len(cached)}[/bold green]\n"
+                    f"• Forced Offline Mode: [bold]{'ENABLED' if self.orchestrator.force_offline else 'DISABLED (Auto-detects network)'}[/bold]\n\n"
+                    f"[bold white]Stored Searches in Local Memory DB:[/bold white]\n"
+                    f"{searches_list}\n\n"
+                    f"[dim]Usage: '/offline on', '/offline off', or '/offline tomatoes'[/dim]",
+                    title="[bold yellow]Local SQLite Offline Engine[/bold yellow]",
+                    border_style="bright_yellow",
+                    padding=(1, 2)
+                ))
+                return True
+
         return False
 
     def _print_help(self) -> None:
@@ -142,6 +175,7 @@ class ConversationManager:
             "  [yellow]/doctor[/yellow]           — Test WebCMD browser connectivity and stealth daemon\n"
             "  [yellow]/model [name][/yellow]    — Show or switch active Ollama brain model\n"
             "  [yellow]/headless [on|off][/yellow] — Toggle visible browser window\n"
+            "  [yellow]/offline [query][/yellow]  — Inspect or search local SQLite database offline (0s latency)\n"
             "  [yellow]/recipes[/yellow]          — View cached self-learned browser automation recipes\n"
             "  [yellow]/reset[/yellow]            — Reset conversation context and clear active tabs\n"
             "  [yellow]/exit[/yellow]             — Safely close browser and exit\n\n"
