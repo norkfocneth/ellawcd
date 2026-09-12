@@ -29,3 +29,6 @@ data/settings.json
 *.onnx
 *.bin
 
+# Temporary test scripts
+scratch/
+

@@ -31,7 +31,12 @@ BROWSER_INTENT_KEYWORDS = [
     "laptop", "laptops", "amazon", "flipkart", "croma", "ecommerce", "buy", "store",
     "deal", "deals", "dhoondo", "khojo", "dekho", "kholo", "batao",
     "download", "install", "extension", "extensions", "wallet", "metamask",
-    "addon", "addons", "plugin", "setup", "get"
+    "addon", "addons", "plugin", "setup", "get",
+    # Quick Commerce & Grocery Intent
+    "quick commerce", "q-commerce", "quick eccoece", "quick ecommerce", "grocery", "groceries",
+    "tomato", "tomatoes", "onion", "potato", "vegetable", "vegetables", "milk", "fruits", "fruit",
+    "blinkit", "zepto", "instamart", "swiggy", "zomato", "amazon fresh", "bigbasket", "bbnow",
+    "flipkart quick", "flipkart minutes", "cheapest", "sasta", "saste"
 ]
 
 

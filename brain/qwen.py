@@ -141,7 +141,8 @@ class QwenBrain:
         """
         planner_prompt = f"""You are the Planning Engine of ELLA-WCD, an autonomous browser agent.
 Decompose the following user task into a structured, step-by-step browser plan.
-If the user asks to search or compare across multiple websites (e.g. 3 ecommerce sites like Amazon, Flipkart, Croma, etc.), set is_multi_site to true and list each site with its target URL and search query.
+- If the user asks to search or compare across multiple ecommerce sites (Amazon, Flipkart, Croma), set is_multi_site to true and category to "ecommerce".
+- If the user asks to search, find, or compare across quick commerce / 10-minute grocery brands (e.g. Blinkit/Zomato, Zepto, Swiggy Instamart, Amazon Fresh, Flipkart Minutes) or find cheapest vegetables/groceries like tomatoes, set is_multi_site to true, category to "quick_commerce", and configure the 3 target quick commerce sites (Blinkit, Zepto, Swiggy Instamart/Amazon Fresh).
 
 User Task: "{task_goal}"
 
@@ -149,9 +150,10 @@ Respond ONLY with a valid JSON object matching this schema:
 {{
   "understanding": "1 sentence summarizing the goal",
   "is_multi_site": true/false,
+  "category": "quick_commerce | ecommerce | research | general",
   "sites": [
     {{
-      "name": "Site name (e.g. Amazon, Flipkart, Croma)",
+      "name": "Site name (e.g. Blinkit, Zepto, Swiggy Instamart or Amazon)",
       "url": "https://...",
       "query": "search query"
     }}
@@ -166,8 +168,8 @@ Respond ONLY with a valid JSON object matching this schema:
       "value": "Optional text to search or type"
     }}
   ],
-  "verification_criteria": "How to verify success (e.g. valid products extracted from each site)",
-  "learned_pattern_name": "Short identifier for site memory, e.g. 'ecommerce_laptop_comparison'"
+  "verification_criteria": "How to verify success (e.g. valid products & prices extracted across sites)",
+  "learned_pattern_name": "Short identifier for site memory, e.g. 'qcommerce_tomato_comparison'"
 }}
 
 Do NOT include any markdown formatting around the JSON if possible, just the raw JSON object.
@@ -190,9 +192,28 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
                 if "```" in content:
                     content = content.split("```json")[-1].split("```")[0].strip()
                 parsed = json.loads(content)
-                # Check if multi-site intent is present in task goal even if LLM missed the boolean
                 lower_goal = task_goal.lower()
-                if any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "amazon and flipkart", "amazon, flipkart"]):
+
+                # Check if Quick Commerce intent is detected
+                qcom_kws = [
+                    "quick commerce", "q-commerce", "quick eccoece", "quick ecommerce",
+                    "blinkit", "zepto", "instamart", "swiggy", "zomato", "amazon fresh",
+                    "bigbasket", "bbnow", "flipkart quick", "flipkart minutes",
+                    "tomato", "tomatoes", "onion", "vegetable", "vegetables", "grocery", "groceries", "milk", "sasta"
+                ]
+                if any(k in lower_goal for k in qcom_kws):
+                    parsed["is_multi_site"] = True
+                    parsed["category"] = "quick_commerce"
+                    if not parsed.get("sites") or len(parsed.get("sites", [])) < 3:
+                        t3 = {"name": "Swiggy Instamart", "url": "https://www.swiggy.com/instamart", "query": task_goal} if ("swiggy" in lower_goal or "instamart" in lower_goal) else {"name": "Amazon Fresh", "url": "https://www.amazon.in", "query": task_goal}
+                        parsed["sites"] = [
+                            {"name": "Blinkit", "url": "https://blinkit.com", "query": task_goal},
+                            {"name": "Zepto", "url": "https://www.zeptonow.com", "query": task_goal},
+                            t3
+                        ]
+
+                # Check standard multi-site intent
+                elif any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "amazon and flipkart", "amazon, flipkart"]):
                     parsed["is_multi_site"] = True
                     if not parsed.get("sites"):
                         parsed["sites"] = [
@@ -206,31 +227,54 @@ Do NOT include any markdown formatting around the JSON if possible, just the raw
 
         # Rule-based fallback plan if LLM parsing fails
         lower_goal = task_goal.lower()
-        is_multi = any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "ecommerce"])
+        qcom_kws = [
+            "quick commerce", "q-commerce", "quick eccoece", "quick ecommerce",
+            "blinkit", "zepto", "instamart", "swiggy", "zomato", "amazon fresh",
+            "bigbasket", "bbnow", "flipkart quick", "flipkart minutes",
+            "tomato", "tomatoes", "onion", "vegetable", "vegetables", "grocery", "groceries", "milk", "sasta"
+        ]
+        is_qcom = any(k in lower_goal for k in qcom_kws)
+        is_multi = is_qcom or any(k in lower_goal for k in ["3 ecommerce", "three ecommerce", "across", "compare", "ecommerce"])
+        
         clean_val = task_goal
-        for prefix in ["open 3 ecommerce website and search for ", "open 3 websites and search for ", "find best ", "search for ", "find "]:
+        for prefix in [
+            "open broswer and find ", "open browser and find ", "open 3 ecommerce website and search for ",
+            "open 3 websites and search for ", "find best ", "search for ", "find "
+        ]:
             if clean_val.lower().startswith(prefix):
                 clean_val = clean_val[len(prefix):]
 
         sites = []
-        if is_multi:
+        if is_qcom:
+            t3 = {"name": "Swiggy Instamart", "url": "https://www.swiggy.com/instamart", "query": clean_val.strip()} if ("swiggy" in lower_goal or "instamart" in lower_goal) else {"name": "Amazon Fresh", "url": "https://www.amazon.in", "query": clean_val.strip()}
+            sites = [
+                {"name": "Blinkit", "url": "https://blinkit.com", "query": clean_val.strip()},
+                {"name": "Zepto", "url": "https://www.zeptonow.com", "query": clean_val.strip()},
+                t3
+            ]
+            pattern_name = "qcommerce_grocery_comparison"
+        elif is_multi:
             sites = [
                 {"name": "Amazon", "url": "https://www.amazon.in", "query": clean_val.strip()},
                 {"name": "Flipkart", "url": "https://www.flipkart.com", "query": clean_val.strip()},
                 {"name": "Croma", "url": "https://www.croma.com", "query": clean_val.strip()}
             ]
+            pattern_name = "ecommerce_multi_search"
+        else:
+            pattern_name = "web_search_flow"
 
         return {
             "understanding": task_goal,
             "is_multi_site": is_multi,
+            "category": "quick_commerce" if is_qcom else ("ecommerce" if is_multi else "general"),
             "sites": sites,
-            "starting_url": "https://www.amazon.in" if is_multi else "https://search.brave.com",
+            "starting_url": "https://blinkit.com" if is_qcom else ("https://www.amazon.in" if is_multi else "https://www.google.com"),
             "steps": [
-                {"step_id": 1, "action": "search", "description": "Search for query across sites", "target": "input", "value": clean_val.strip()},
-                {"step_id": 2, "action": "extract", "description": "Extract top results", "target": "product card", "value": ""}
+                {"step_id": 1, "action": "search", "description": "Search for query across target platforms", "target": "input", "value": clean_val.strip()},
+                {"step_id": 2, "action": "extract", "description": "Extract product cards, prices, and pack weights", "target": "product card", "value": ""}
             ],
-            "verification_criteria": "Extract at least 3 relevant items from target sites",
-            "learned_pattern_name": "ecommerce_multi_search" if is_multi else "web_search_flow"
+            "verification_criteria": "Extract at least 3 relevant items and identify cheapest option",
+            "learned_pattern_name": pattern_name
         }
 
     def vision_localize(self, query: str, image_bytes: bytes) -> Dict[str, Any]:

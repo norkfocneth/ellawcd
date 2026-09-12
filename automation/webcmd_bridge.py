@@ -17,11 +17,39 @@ from logger import get_logger
 
 log = get_logger("automation.webcmd")
 
-# Ensure Brave Browser executable is explicitly configured for Cloak/WebCMD
-BRAVE_DEFAULT_PATH = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
-if os.path.exists(BRAVE_DEFAULT_PATH):
-    os.environ["CLOAKBROWSER_BINARY_PATH"] = BRAVE_DEFAULT_PATH
-    os.environ["WEBCMD_BROWSER_EXECUTABLE_PATH"] = BRAVE_DEFAULT_PATH
+# Configure Google Chrome as the primary browser executable
+def _resolve_chrome_path() -> str:
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    # Fallback to Brave only if Chrome not found
+    brave_path = Path(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe")
+    if brave_path.exists():
+        return str(brave_path)
+    return ""
+
+CHROME_PRIMARY_PATH = _resolve_chrome_path()
+if CHROME_PRIMARY_PATH:
+    os.environ["CLOAKBROWSER_BINARY_PATH"] = CHROME_PRIMARY_PATH
+    os.environ["WEBCMD_BROWSER_EXECUTABLE_PATH"] = CHROME_PRIMARY_PATH
+    log.info(f"Primary browser configured: {CHROME_PRIMARY_PATH}")
+    try:
+        cfg_file = Path.home() / ".webcmd" / "config.json"
+        if cfg_file.exists():
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                c_data = json.load(f)
+            if c_data.get("browser", {}).get("executablePath") != CHROME_PRIMARY_PATH:
+                c_data.setdefault("browser", {})["kind"] = "custom"
+                c_data["browser"]["executablePath"] = CHROME_PRIMARY_PATH
+                with open(cfg_file, "w", encoding="utf-8") as f:
+                    json.dump(c_data, f, indent=2)
+    except Exception:
+        pass
 
 
 class WebcmdBridge:

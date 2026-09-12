@@ -79,7 +79,8 @@ GENERATION_CONFIG = {
 
 # ── WebCMD Browser Agent ──────────────────────
 WEBCMD_PROFILE = "default"
-WEBCMD_HEADLESS = True
+WEBCMD_HEADLESS = False
+BROWSER_NAME = "Google Chrome"
 BROWSER_TIMEOUT = 30
 
 # ── Voice (Disabled for Hackathon MVP) ─────────

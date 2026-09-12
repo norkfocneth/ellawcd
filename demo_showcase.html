@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ELLA-WCD v2.0 — Autonomous Browser CLI Agent Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(circle at top, #181926 0%, #0d0e15 100%);
+    font-family: 'Consolas', 'Cascadia Code', 'Fira Code', monospace;
+    color: #cad3f5;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+    overflow-x: hidden;
+  }
+  .header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(138, 173, 244, 0.1);
+    border: 1px solid rgba(138, 173, 244, 0.3);
+    padding: 6px 18px;
+    border-radius: 50px;
+    font-size: 13px;
+    color: #8aadf4;
+    margin-bottom: 20px;
+    letter-spacing: 0.5px;
+    backdrop-filter: blur(10px);
+  }
+  .terminal-window {
+    width: 100%;
+    max-width: 960px;
+    background: #11121d;
+    border-radius: 12px;
+    border: 1px solid #2b2d42;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(138, 173, 244, 0.1);
+    overflow: hidden;
+    position: relative;
+  }
+  .terminal-bar {
+    background: #181926;
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #2b2d42;
+  }
+  .terminal-controls {
+    display: flex;
+    gap: 8px;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .dot-red { background: #ed8796; }
+  .dot-yellow { background: #eed49f; }
+  .dot-green { background: #a6da95; }
+  .terminal-title {
+    font-size: 13px;
+    color: #a5adcb;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+  }
+  .terminal-body {
+    padding: 24px;
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 520px;
+    max-height: 720px;
+    overflow-y: auto;
+  }
+  .line { margin-bottom: 8px; opacity: 0; transform: translateY(6px); transition: all 0.35s ease; }
+  .line.show { opacity: 1; transform: translateY(0); }
+  .prompt-symbol { color: #f5bde6; font-weight: bold; }
+  .user-input { color: #8aadf4; font-weight: bold; }
+  .dim { color: #6e738d; }
+  .cyan { color: #8bd5ca; font-weight: bold; }
+  .green { color: #a6da95; font-weight: bold; }
+  .yellow { color: #eed49f; font-weight: bold; }
+  .orange { color: #f5a97f; font-weight: bold; }
+  .red { color: #ed8796; font-weight: bold; }
+  .magenta { color: #f5bde6; font-weight: bold; }
+  
+  /* Badges */
+  .badge-orange { background: #f5a97f; color: #11121d; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+  .badge-cyan { background: #8bd5ca; color: #11121d; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+  .badge-red { background: #ed8796; color: #11121d; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+  .badge-green { background: #a6da95; color: #11121d; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+
+  /* Panels */
+  .panel {
+    border: 1px solid #365b9e;
+    border-radius: 8px;
+    padding: 16px 20px;
+    background: rgba(30, 32, 48, 0.6);
+    margin: 14px 0;
+    position: relative;
+  }
+  .panel-header {
+    position: absolute;
+    top: -12px;
+    left: 20px;
+    background: #11121d;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: bold;
+    color: #8aadf4;
+  }
+  .panel-footer {
+    position: absolute;
+    bottom: -10px;
+    right: 20px;
+    background: #11121d;
+    padding: 0 8px;
+    font-size: 11px;
+    color: #6e738d;
+  }
+
+  /* Table */
+  .demo-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  .demo-table th {
+    background: #181926;
+    color: #8bd5ca;
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid #365b9e;
+  }
+  .demo-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(54, 91, 158, 0.3);
+    color: #cad3f5;
+  }
+
+  .cursor {
+    display: inline-block;
+    width: 9px;
+    height: 18px;
+    background: #8aadf4;
+    vertical-align: middle;
+    animation: blink 0.8s infinite;
+  }
+  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+  .replay-btn {
+    margin-top: 25px;
+    padding: 10px 24px;
+    border-radius: 8px;
+    background: #8aadf4;
+    color: #11121d;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    transition: all 0.2s;
+  }
+  .replay-btn:hover {
+    background: #b7bdf8;
+    transform: translateY(-2px);
+  }
+</style>
+</head>
+<body>
+
+<div class="header-badge">
+  <span>✦</span> SLAB / WCD HACKATHON PROTOTYPE DEMO • 100% LOCAL AI
+</div>
+
+<div class="terminal-window">
+  <div class="terminal-bar">
+    <div class="terminal-controls">
+      <span class="dot dot-red"></span>
+      <span class="dot dot-yellow"></span>
+      <span class="dot dot-green"></span>
+    </div>
+    <div class="terminal-title">
+      <span>Command Prompt — ellawcd</span>
+    </div>
+    <div style="font-size: 11px; color: #6e738d;">Qwen2.5-VL • WebCMD Engine</div>
+  </div>
+
+  <div class="terminal-body" id="terminal">
+    <!-- Dynamic Demo Content rendered via JS -->
+  </div>
+</div>
+
+<button class="replay-btn" onclick="startDemo()">↻ Replay Prototype Demo</button>
+
+<script>
+const scriptData = [
+  { delay: 400, html: '<span class="dim">Microsoft Windows [Version 10.0.26100.1] (c) Microsoft Corporation.</span>' },
+  { delay: 600, html: '<span>C:\\Users\\FOCNETH&gt; </span><span class="user-input" id="type1"></span><span class="cursor" id="c1"></span>' },
+  { delay: 1800, action: () => typeText('type1', 'c1', 'ellawcd', startFlow1) }
+];
+
+function typeText(elemId, cursorId, text, callback) {
+  let i = 0;
+  const elem = document.getElementById(elemId);
+  const interval = setInterval(() => {
+    elem.textContent += text[i];
+    i++;
+    if (i >= text.length) {
+      clearInterval(interval);
+      document.getElementById(cursorId)?.remove();
+      setTimeout(callback, 500);
+    }
+  }, 90);
+}
+
+function appendLine(html) {
+  const terminal = document.getElementById('terminal');
+  const line = document.createElement('div');
+  line.className = 'line';
+  line.innerHTML = html;
+  terminal.appendChild(line);
+  setTimeout(() => line.classList.add('show'), 40);
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+function startFlow1() {
+  const steps1 = [
+    { delay: 300, html: '<span class="dim">───────────────────────────────────────────────────────────</span>' },
+    { delay: 400, html: '<span class="magenta">✦</span> <span class="cyan">ELLA-WCD v2.0</span> <span class="dim">• Autonomous Self-Learning Browser CLI</span>' },
+    { delay: 500, html: '<span class="green">✓</span> <span class="dim">Vision Brain:</span> <span class="yellow">Qwen2.5-VL 7B (Pinned in GPU VRAM)</span>' },
+    { delay: 600, html: '<span class="green">✓</span> <span class="dim">Engine:</span> <span class="cyan">WebCMD Deterministic Browser (Brave / Chromium)</span>' },
+    { delay: 700, html: '<span class="green">✓</span> <span class="dim">Memory Store:</span> <span class="cyan">SQLite Site Workflows Cached</span>' },
+    { delay: 800, html: '<span class="dim">Type your task in English or Hinglish. Type \'/exit\' to quit.</span>' },
+    { delay: 1000, html: '<br><span class="prompt-symbol">ELLA &gt; </span><span class="user-input" id="type2"></span><span class="cursor" id="c2"></span>' },
+    { delay: 1200, action: () => typeText('type2', 'c2', 'compare RTX 3050 laptops across Amazon, Flipkart, and Croma', startEcommerceTask) }
+  ];
+  runSequence(steps1);
+}
+
+function startEcommerceTask() {
+  const steps2 = [
+    { delay: 400, html: '<span class="cyan">═══════════════════════════════════════════════════════════</span>' },
+    { delay: 500, html: '<span class="cyan">[PLAN]</span> Multi-Site Autonomous Orchestration initialized' },
+    { delay: 700, html: '  <span class="green">✓</span> Understanding: Compare RTX 3050 laptops across 3 platforms' },
+    { delay: 900, html: '  <span class="green">✓</span> Strategy: Parallel multi-tab crawling with Vision Fallback' },
+    { delay: 1200, html: '<span class="yellow">[BROWSER]</span> Spawning isolated Brave tabs...' },
+    { delay: 1400, html: '  <span class="blue">→</span> <span class="cyan">Tab 1:</span> Navigating to Amazon.in (RTX 3050 laptops)' },
+    { delay: 1700, html: '  <span class="blue">→</span> <span class="cyan">Tab 2:</span> Navigating to Flipkart.com (RTX 3050 laptops)' },
+    { delay: 2000, html: '  <span class="blue">→</span> <span class="cyan">Tab 3:</span> Navigating to Croma.com (RTX 3050 laptops)' },
+    { delay: 2300, html: '<span class="green">[VERIFY]</span> 3 real-time store catalogs crawled successfully -&gt; <span class="green">PASS</span>' },
+    { delay: 2700, html: '<span class="green">[LEARN]</span> Updated SQLite site memory for amazon.in, flipkart.com, croma.com' },
+    { delay: 3000, html: `
+      <div class="panel" style="border-color: #a6da95;">
+        <div class="panel-header" style="color: #a6da95;">✦ Cross-Site Autonomous Analysis Result • Qwen2.5-VL</div>
+        <div style="margin-top: 5px;">
+          <div style="margin-bottom: 14px;">
+            <span class="badge-orange"> 1. </span> <span class="orange">Executive Best Pick — Lenovo IdeaPad Gaming 3 (Flipkart):</span><br>
+            <span style="color: #cad3f5; padding-left: 10px;">At <b>₹59,990</b>, offers the highest price-to-performance value with RTX 3050 4GB GPU and 120Hz display.</span>
+          </div>
+          <div style="margin-bottom: 14px;">
+            <span class="badge-cyan"> 2. </span> <span class="cyan">Runner Up — ASUS TUF Gaming A15 (Amazon):</span><br>
+            <span style="color: #cad3f5; padding-left: 10px;">Priced at <b>₹64,990</b>, featuring military-grade durability, larger 90Whr battery, and Ryzen 7 multitasking.</span>
+          </div>
+          <div style="margin-bottom: 14px;">
+            <span class="badge-red"> 3. </span> <span class="red">Retail Availability &amp; Deal Verdict:</span><br>
+            <span style="color: #cad3f5; padding-left: 10px;">Croma lists HP Victus at <b>₹62,490</b> with instant bank discount options, while Flipkart provides lowest direct checkout price.</span>
+          </div>
+          <table class="demo-table">
+            <thead>
+              <tr><th>Store</th><th>Model</th><th>Price</th><th>Highlight</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><b>Flipkart</b></td><td>Lenovo IdeaPad Gaming 3</td><td style="color:#a6da95;">₹59,990</td><td>Lowest price deal</td></tr>
+              <tr><td><b>Amazon</b></td><td>ASUS TUF Gaming A15</td><td style="color:#a6da95;">₹64,990</td><td>Best cooling &amp; 90Whr battery</td></tr>
+              <tr><td><b>Croma</b></td><td>HP Victus 15</td><td style="color:#a6da95;">₹62,490</td><td>Instant bank card offer</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel-footer">Verified Autonomous Browser Execution • Zero Hallucination</div>
+      </div>
+    ` },
+    { delay: 3500, html: '<br><span class="prompt-symbol">ELLA &gt; </span><span class="user-input" id="type3"></span><span class="cursor" id="c3"></span>' },
+    { delay: 3800, action: () => typeText('type3', 'c3', 'open browser and download metamask wallet extension', startDownloadTask) }
+  ];
+  runSequence(steps2);
+}
+
+function startDownloadTask() {
+  const steps3 = [
+    { delay: 400, html: '<span class="cyan">═══════════════════════════════════════════════════════════</span>' },
+    { delay: 600, html: '<span class="cyan">[DOWNLOAD/EXT]</span> Autonomous Extension Installation Workflow' },
+    { delay: 900, html: '  <span class="green">✓</span> Target: <span style="color: white; font-weight: bold;">MetaMask Wallet Extension</span>' },
+    { delay: 1100, html: '  <span class="green">✓</span> Store Discovery: <span class="cyan">https://chromewebstore.google.com/detail/metamask/...</span>' },
+    { delay: 1400, html: '<span class="yellow">[BROWSER]</span> Navigating to official Chrome Web Store in Brave...' },
+    { delay: 1800, html: '  <span class="green">✓</span> Page Verified: <b>MetaMask - Chrome Web Store</b>' },
+    { delay: 2100, html: '  <span class="green">✓</span> Action Button Detected: <span class="badge-green">Add to Brave</span>' },
+    { delay: 2400, html: '<span class="dim">───────────────────────────────────────────────────────────</span>' },
+    { delay: 2600, html: '<span class="yellow">✦ Permission Required: Should I proceed to add to brave \'metamask wallet extension\'? (y/n): </span><span class="user-input" id="type4"></span><span class="cursor" id="c4"></span>' },
+    { delay: 2900, action: () => typeText('type4', 'c4', 'y', finishDownloadTask) }
+  ];
+  runSequence(steps3);
+}
+
+function finishDownloadTask() {
+  const steps4 = [
+    { delay: 300, html: '  <span class="green">✓</span> Permission <span class="green">GRANTED</span>. Clicking \'Add to Brave\' in Brave Browser...' },
+    { delay: 900, html: `
+      <div class="panel" style="border-color: #8bd5ca;">
+        <div class="panel-header" style="color: #8bd5ca;">✦ Autonomous Download &amp; Extension Execution • Qwen2.5-VL</div>
+        <div style="margin-top: 5px;">
+          <div style="margin-bottom: 10px;">
+            <span class="badge-orange"> 1. </span> <span class="orange">Target Discovered &amp; Verified:</span><br>
+            <span style="color: #cad3f5; padding-left: 10px;">Page: <b>MetaMask - Chrome Web Store</b> (Official Consensys Store ID)</span>
+          </div>
+          <div style="margin-bottom: 10px;">
+            <span class="badge-cyan"> 2. </span> <span class="cyan">Operator Permission &amp; Action:</span><br>
+            <span style="color: #cad3f5; padding-left: 10px;">Confirmed by user (<b>y</b>) → Clicked <b>\'Add to Brave\'</b> button successfully.</span>
+          </div>
+          <div style="margin-bottom: 10px;">
+            <span class="badge-red"> 3. </span> <span class="red">Status:</span><br>
+            <span style="color: #cad3f5; padding-left: 10px;">Extension addition initiated directly in Brave Browser without manual search hassle!</span>
+          </div>
+        </div>
+        <div class="panel-footer">Local AI Automation • Privacy First</div>
+      </div>
+    ` },
+    { delay: 1400, html: '<span class="dim">Task completed in 3.12s | Brave Session: closed</span>' },
+    { delay: 1800, html: '<br><span class="prompt-symbol">ELLA &gt; </span><span class="cursor"></span>' }
+  ];
+  runSequence(steps4);
+}
+
+function runSequence(steps) {
+  let accumulatedTime = 0;
+  steps.forEach(step => {
+    accumulatedTime += step.delay;
+    setTimeout(() => {
+      if (step.html) appendLine(step.html);
+      if (step.action) step.action();
+    }, accumulatedTime);
+  });
+}
+
+function startDemo() {
+  document.getElementById('terminal').innerHTML = '';
+  runSequence(scriptData);
+}
+
+window.onload = startDemo;
+</script>
+
+</body>
+</html>
