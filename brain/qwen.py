@@ -17,11 +17,14 @@ log = get_logger("brain.qwen")
 
 # Priority list of models to try
 MODEL_PREFERENCES = [
+    "qwen2.5:1.5b",
+    "qwen2.5:3b",
     "qwen2.5vl:7b",
     "qwen3-vl:8b-instruct",
     "qwen3-vl:8b",
     "qwen2.5-vl:7b",
     "qwen2.5vl:3b",
+    "qwen2.5:0.5b",
 ]
 
 

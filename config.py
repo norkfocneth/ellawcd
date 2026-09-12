@@ -57,22 +57,22 @@ VOICE_PROFILE = DATA_DIR / "voice_profile.bin"
 # Ollama server URL (local)
 OLLAMA_BASE_URL = "http://localhost:11434"
 
-# Model to use — Qwen2.5-VL 7B (Vision + Reasoning + Browser Tool Calling)
-MODEL_NAME = "qwen2.5vl:7b"
+# Model to use — Qwen2.5 1.5B (Ultra-Fast Text & Agent Reasoning)
+MODEL_NAME = "qwen2.5:1.5b"
 
 # Ollama keep_alive (-1 = keep model pinned in GPU VRAM indefinitely)
 KEEP_ALIVE = -1
 
-# Generation parameters (GPU-First, Precise Agent Output)
+# Generation parameters (GPU-First, Ultra-Fast Response)
 GENERATION_CONFIG = {
     "temperature": 0.3,          # Balanced temperature for creativity + deterministic formatting
     "top_p": 0.85,
     "top_k": 30,
     "repeat_penalty": 1.25,      # Eliminates degenerate repetitive looping in Hinglish/English
     "repeat_last_n": 128,        # Lookback window for repetition penalty
-    "num_predict": 768,          # Adequate context length for structured multi-point answers
-    "num_ctx": 8192,             # 8k context for rich page summaries
-    "num_gpu": 99,               # Force layers to GPU offload
+    "num_predict": 512,          # Adequate context length for structured multi-point answers
+    "num_ctx": 4096,             # 4k context for lightning-fast prefill and generation
+    "num_gpu": 99,               # Force all layers to RTX 5060 GPU offload
     "use_mmap": True,            # Memory mapping
     "num_thread": 8,             # CPU fallback if needed
 }
