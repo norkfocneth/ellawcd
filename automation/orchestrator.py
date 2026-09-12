@@ -20,6 +20,7 @@ from rich import box
 from rich.panel import Panel
 from ui import console, print_task_result, EllaMarkdown
 from automation.webcmd_bridge import WebcmdBridge
+from automation.daily_workflows import DailyWorkflows
 from brain.qwen import QwenBrain
 from memory import Memory
 from logger import get_logger
@@ -57,6 +58,7 @@ class BrowserOrchestrator:
         self.brain = brain
         self.webcmd = webcmd or WebcmdBridge()
         self.memory = Memory()
+        self.daily_workflows = DailyWorkflows(self)
         self.active_session_id: Optional[str] = None
         self.force_offline: bool = False
 
@@ -110,6 +112,78 @@ class BrowserOrchestrator:
         ]
         if any(kw in lower_goal for kw in download_keywords):
             return self._execute_download_or_extension_task(user_goal, plan, start_time)
+
+        # 1. Pharmacy & Medicines
+        pharmacy_keywords = [
+            "medicine", "medicines", "tablet", "tablets", "capsule", "capsules", "syrup", "dawa", "dawain",
+            "1mg", "tata 1mg", "netmeds", "apollo pharmacy", "pharmeasy", "paracetamol", "crocin", "azithromycin",
+            "whey protein", "multivitamin", "creatine", "dolo", "cough syrup", "pharmacy"
+        ]
+        if any(kw in lower_goal for kw in pharmacy_keywords):
+            return self._execute_pharmacy_task(user_goal, plan, start_time)
+
+        # 2. Flight & Travel Fares
+        travel_keywords = [
+            "flight", "flights", "air ticket", "tickets", "airfare", "fare", "makemytrip", "easemytrip",
+            "cleartrip", "indigo", "air india", "vistara", "delhi to mumbai", "bangalore to delhi", "mumbai to goa"
+        ]
+        if any(kw in lower_goal for kw in travel_keywords):
+            return self._execute_travel_task(user_goal, plan, start_time)
+
+        # 3. Academic & Research Papers
+        research_keywords = [
+            "arxiv", "pubmed", "research paper", "research papers", "preprints", "scientific papers"
+        ]
+        if any(kw in lower_goal for kw in research_keywords):
+            return self._execute_research_papers_task(user_goal, plan, start_time)
+
+        # 4. Jobs & Internships
+        jobs_keywords = [
+            "job", "jobs", "internship", "internships", "hiring", "vacancy", "vacancies", "naukri",
+            "linkedin jobs", "indeed", "wellfound", "developer job", "remote job"
+        ]
+        if any(kw in lower_goal for kw in jobs_keywords):
+            return self._execute_jobs_task(user_goal, plan, start_time)
+
+        # 5. Food Delivery Cart Optimizer
+        food_keywords = [
+            "food delivery", "swiggy food", "zomato food", "order food", "zomato vs swiggy", "swiggy vs zomato",
+            "biryani order", "pizza order", "burger order"
+        ]
+        if any(kw in lower_goal for kw in food_keywords):
+            return self._execute_food_delivery_task(user_goal, plan, start_time)
+
+        # 6. Mobile Recharge & Telecom Plans
+        recharge_keywords = [
+            "recharge", "recharge plan", "prepaid plan", "jio plan", "airtel plan", "vi plan", "validity plan",
+            "per day data", "84 days plan", "28 days plan", "telecom plan", "data pack"
+        ]
+        if any(kw in lower_goal for kw in recharge_keywords):
+            return self._execute_recharge_task(user_goal, plan, start_time)
+
+        # 7. Real Estate & Rental Flats
+        real_estate_keywords = [
+            "flat", "flats", "rent", "rental", "pg", "1bhk", "2bhk", "3bhk", "nobroker", "magicbricks",
+            "99acres", "flat for rent", "house rent", "room rent"
+        ]
+        if any(kw in lower_goal for kw in real_estate_keywords):
+            return self._execute_real_estate_task(user_goal, plan, start_time)
+
+        # 8. Tech & AI Morning Digest
+        digest_keywords = [
+            "tech digest", "morning digest", "trending repos", "github trending", "hackernews", "daily digest",
+            "today tech news", "ai news digest"
+        ]
+        if any(kw in lower_goal for kw in digest_keywords):
+            return self._execute_tech_digest_task(user_goal, plan, start_time)
+
+        # 9. Competitor & Market Research
+        competitor_keywords = [
+            "competitor", "pricing table", "landing page inspect", "competitor pricing", "saas pricing",
+            "market research", "competitor analysis"
+        ]
+        if any(kw in lower_goal for kw in competitor_keywords):
+            return self._execute_competitor_tracker_task(user_goal, plan, start_time)
 
         # Check if multi-site comparison is requested (Electronics, Quick Commerce, or Clothing)
         multi_keywords = [
@@ -903,8 +977,20 @@ Keep it direct, sharp, and easy to read.
                     f"**Analysis Summary**:\n\n"
                     f"Successfully crawled {len(targets)} ecommerce stores ({targets[0]['name']}, {targets[1]['name']}, {targets[2]['name']}) "
                     f"and retrieved {len(all_products)} product listings for `{ecom_query}`.\n\n"
-                    f"Notice: Brain synthesis encountered a momentary timeout ({e}), but all data was gathered."
+                    f"Notice: Brain synthesis note ({e}), but all product data was gathered."
                 )
+        # Cache snapshot in local SQLite database for offline availability
+        try:
+            self.memory.save_search_cache(
+                query=ecom_query,
+                category="electronics",
+                items=all_products,
+                winner=all_products[0] if all_products else {},
+                final_answer=final_answer
+            )
+            console.print(f"  [green]✓[/green] [dim]Cached electronics search snapshot in SQLite (data/memory.db)[/dim]")
+        except Exception as e:
+            log.debug(f"Search cache note: {e}")
 
         print_task_result(final_answer, title="Cross-Site Autonomous Analysis Result", model_name=self.brain.active_model)
 
@@ -1967,52 +2053,9 @@ Keep it sharp, helpful, and pleasant.
                 padding=(1, 2)
             ))
 
-            # Render structured table if items exist
+            # Render structured domain table if items exist
             if items:
-                table = Table(title=f"Offline Cached Comparison for '{query_item.title()}' (Last saved: {formatted_time})", box=box.ROUNDED)
-                if category == "clothing":
-                    table.add_column("Store / Platform", style="bold cyan", no_wrap=True)
-                    table.add_column("Brand", style="yellow")
-                    table.add_column("Product Title", style="white")
-                    table.add_column("Saved Live Price", style="bold green")
-                    table.add_column("Discount", style="bright_magenta")
-                    table.add_column("Rating", style="bold bright_yellow")
-                    table.add_column("Saved Product URL", style="dim blue")
-
-                    for it in items:
-                        table.add_row(
-                            str(it.get("store", "Store")),
-                            str(it.get("brand", "")),
-                            str(it.get("title", "")),
-                            str(it.get("price", "")),
-                            str(it.get("discount", "")),
-                            str(it.get("rating", "")),
-                            str(it.get("link", ""))
-                        )
-                else:
-                    # Quick commerce table
-                    table.add_column("Store / Platform", style="bold cyan", no_wrap=True)
-                    table.add_column("Product Title", style="white")
-                    table.add_column("Pack / Weight", style="dim")
-                    table.add_column("Saved Live Price", style="bold green")
-                    table.add_column("Rate / Unit", style="yellow")
-                    table.add_column("Standard Delivery ETA", style="magenta")
-                    table.add_column("Saved Product URL", style="dim blue")
-
-                    for it in items:
-                        table.add_row(
-                            str(it.get("store", "Store")),
-                            str(it.get("title", "")),
-                            str(it.get("weight", "Standard")),
-                            str(it.get("price", "")),
-                            str(it.get("rate_per_kg", "")),
-                            str(it.get("eta", "")),
-                            str(it.get("link", ""))
-                        )
-
-                console.print()
-                console.print(table)
-                console.print()
+                DailyWorkflows.render_offline_table(category, query_item, items, formatted_time)
 
             # Render Winner Card if exists
             if winner:
@@ -2093,6 +2136,33 @@ Keep it sharp, helpful, and pleasant.
                 "answer": err_msg,
                 "elapsed_seconds": time.time() - start_time
             }
+
+    def _execute_pharmacy_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_pharmacy(user_goal, plan, start_time)
+
+    def _execute_travel_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_travel(user_goal, plan, start_time)
+
+    def _execute_research_papers_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_research(user_goal, plan, start_time)
+
+    def _execute_jobs_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_jobs(user_goal, plan, start_time)
+
+    def _execute_food_delivery_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_food(user_goal, plan, start_time)
+
+    def _execute_recharge_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_recharge(user_goal, plan, start_time)
+
+    def _execute_real_estate_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_real_estate(user_goal, plan, start_time)
+
+    def _execute_tech_digest_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_tech_digest(user_goal, plan, start_time)
+
+    def _execute_competitor_tracker_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        return self.daily_workflows.execute_competitor(user_goal, plan, start_time)
 
     def _execute_download_or_extension_task(self, user_goal: str, plan: Dict[str, Any], start_time: float) -> Dict[str, Any]:
         """

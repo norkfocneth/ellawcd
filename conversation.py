@@ -42,6 +42,33 @@ BROWSER_INTENT_KEYWORDS = [
     "tshirt", "t-shirt", "shirt", "shirts", "jeans", "hoodie", "hoodies", "jacket", "jackets",
     "sweatshirt", "sweatshirts", "kurta", "kurti", "saree", "dress", "dresses",
     "shoes", "sneakers", "myntra", "zara", "h&m", "trousers", "pants", "trackpants",
+    # Online Pharmacy & Medicines
+    "medicine", "medicines", "tablet", "tablets", "capsule", "capsules", "syrup", "dawa", "dawain",
+    "1mg", "tata 1mg", "netmeds", "apollo pharmacy", "pharmeasy", "paracetamol", "crocin", "azithromycin",
+    "whey protein", "multivitamin", "creatine", "dolo", "cough syrup", "pharmacy",
+    # Travel & Flight Fares
+    "flight", "flights", "air ticket", "tickets", "airfare", "fare", "makemytrip", "easemytrip",
+    "cleartrip", "indigo", "air india", "vistara", "delhi to mumbai", "bangalore to delhi", "ticket price",
+    # Academic & Research Papers
+    "arxiv", "pubmed", "research paper", "papers", "preprint", "journal", "ieee", "springer",
+    "abstract", "literature", "scholar",
+    # Jobs & Internships
+    "job", "jobs", "internship", "internships", "hiring", "vacancy", "vacancies", "naukri",
+    "linkedin jobs", "indeed", "wellfound", "angellist", "remote job", "developer job",
+    # Food Delivery Cart Optimizer
+    "food delivery", "swiggy food", "zomato food", "order food", "restaurant", "biryani", "pizza",
+    "burger", "roll", "thali", "menu price", "coupon",
+    # Mobile Recharge & Telecom Plans
+    "recharge", "recharge plan", "prepaid plan", "jio plan", "airtel plan", "vi plan", "validity",
+    "per day data", "84 days", "28 days", "telecom plan", "data pack",
+    # Real Estate & Rental Flats / PG
+    "flat", "flats", "rent", "rental", "pg", "1bhk", "2bhk", "3bhk", "nobroker", "magicbricks",
+    "99acres", "room for rent", "flat for rent", "house rent",
+    # Tech Digest & Trending Repos
+    "tech digest", "morning digest", "trending repos", "github trending", "hackernews", "techcrunch",
+    "daily digest", "top tech news", "ai news",
+    # Competitor & Market Research
+    "competitor", "pricing table", "landing page inspect", "competitor pricing", "saas pricing",
     # Offline Intelligence & SQLite Memory Intent
     "offline", "bina internet", "no internet", "without internet", "cache", "cached", "database", "saved search"
 ]
@@ -179,12 +206,22 @@ class ConversationManager:
             "  [yellow]/recipes[/yellow]          — View cached self-learned browser automation recipes\n"
             "  [yellow]/reset[/yellow]            — Reset conversation context and clear active tabs\n"
             "  [yellow]/exit[/yellow]             — Safely close browser and exit\n\n"
-            "[bold cyan]Example Tasks:[/bold cyan]\n"
-            "  • [italic]Compare best RTX 3050 laptops under 1 lakh across Amazon, Flipkart, Vijay Sales[/italic]\n"
-            "  • [italic]Find 5 recent research papers about AI browser agents from arXiv[/italic]\n"
-            "  • [italic]Search GitHub for trending open source web automation agents[/italic]\n"
-            "  • [italic]Open python.org and check the latest stable release version[/italic]",
-            title="[bold magenta]ELLA-WCD v2.0 Guide[/bold magenta]",
+            "[bold cyan]Supported Daily Automations (14 Domains):[/bold cyan]\n"
+            "  1. [green]Quick Commerce[/green]: Compare live rates on Blinkit, Zepto, Amazon Fresh\n"
+            "  2. [green]Fashion & Footwear[/green]: Find clothes & shoes across Flipkart, Amazon, Myntra\n"
+            "  3. [green]Offline Memory DB[/green]: Query cached searches without internet (0.03s latency)\n"
+            "  4. [green]1-Click Installer[/green]: Safely download extensions & apps from official stores\n"
+            "  5. [green]Electronics Deals[/green]: Compare laptops, phones across Amazon, Flipkart, Croma\n"
+            "  6. [green]Online Pharmacy[/green]: Compare medicines & supplements on 1mg, Netmeds, Apollo\n"
+            "  7. [green]Flight Fares[/green]: Compare flights across MakeMyTrip, EaseMyTrip, Cleartrip\n"
+            "  8. [green]Academic Papers[/green]: Pull abstracts & PDF links from arXiv & PubMed\n"
+            "  9. [green]Job Scanner[/green]: Search remote/tech roles on LinkedIn, Indeed, Wellfound\n"
+            " 10. [green]Food Delivery[/green]: Compare cart menus & discounts on Zomato vs Swiggy\n"
+            " 11. [green]Mobile Recharge[/green]: Compare data & validity plans across Jio, Airtel, Vi\n"
+            " 12. [green]Rental Flats / PG[/green]: Find verified 1BHK/2BHK flats on NoBroker, MagicBricks\n"
+            " 13. [green]Tech & AI Digest[/green]: Get 1-minute daily morning briefing from GitHub & HackerNews\n"
+            " 14. [green]Competitor Intel[/green]: Inspect pricing tiers & feature updates on any URL\n",
+            title="[bold magenta]ELLA-WCD v2.0 Guide • 14 Daily Automations[/bold magenta]",
             border_style="magenta",
             padding=(1, 2)
         ))
